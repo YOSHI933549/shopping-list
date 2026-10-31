@@ -1,1 +1,49 @@
-# shopping-list
+# 買い物リスト
+
+紙とペン風の、日本語の買い物リストアプリ（v1）。ブラウザだけで動き、データは**この端末の中（localStorage）だけ**に保存されます。サーバー・アカウント・広告・AI API はありません。
+
+## 何ができるか
+- **買い物リスト**: お店ごとのカードに品物を表示。丸をタップで買った印（取り消し線）→ 少し待って「今日買ったもの」へ移動。「戻す」で元に戻せます。お店で絞り込み、「売り場順」で野菜→肉→魚…とスーパーを歩く順に並べ替え（設定は保存）。
+- **入力して追加**: お店を選んで入力、Enter で連続追加。直近3件の「取り消す」、＋メモ付き。
+- **話して追加**: マイクボタン（Web Speech API・ja-JP）。「牛乳、卵、パン」「豆腐と納豆」のように区切って複数追加。非対応の端末ではマイクを隠します。
+- **定期購入品**: よく買う品を登録して「リストへ」。すでにあれば知らせます。
+- **マイページ**: お店の追加・名前変更・並べ替え・削除（品物は「未設定」へ移動）、JSON の書き出し（ファイル保存＋コピー用テキスト）と取り込み（上書き前に確認）。
+
+## 使い方
+1. 右下の赤いペンで品物を追加する。
+2. お店で買いながら、丸をタップして済んだものを消す。
+3. 買い忘れが心配なときは「今日買ったもの」を開いて「戻す」。
+
+## 開発
+Node.js 20 以上が必要です。
+
+```
+npm install
+npm run dev       # 開発サーバー
+npm run check     # 単体テスト（vitest）
+npm run build     # dist/ に出力（base: './'）
+npm run preview   # build 結果の確認
+npm run e2e       # Playwright(playwright-core) による操作テスト。/opt/google/chrome/chrome を使用
+npm run shots     # 390x844 @3x のスクリーンショットを shots/ に出力
+```
+
+構成: `src/state/store.js`（純粋な状態操作＋保存）、`src/lib/`（分類・アイコン・音声）、`src/data/aisles.js`（売り場の辞書）、`src/ui/`（描画）、`src/main.js`（起動とイベント）。
+
+### 売り場の分類について
+品名を正規化（NFKC・小文字・カタカナ→ひらがな）して、完全一致 → 最長の部分一致 → 「その他」の順で判定します。「豆乳」は牛乳の隣に置かれることが多いので「乳製品・卵」にしています。辞書は `src/data/aisles.js` に追記できます。
+
+## GitHub Pages 公開
+`vite.config.js` の `base` は `'./'` です。ビルド後の JS・CSS・フォント参照はすべて相対パスになるので、同じ `dist/` が `https://<ユーザー名>.github.io/shopping-list/`（末尾スラッシュ付き）でも、ローカルの `preview` でも、Capacitor でも動きます。
+
+`.github/workflows/pages.yml` は `main` への push（と手動実行）で `npm ci` → `npm run check` → `npm run build` を行い、`dist/` を `actions/upload-pages-artifact` と `actions/deploy-pages` で公開します。
+
+初回だけ、リポジトリの Settings → Pages → Build and deployment → Source を **GitHub Actions** にしてください。この切り替えはワークフローだけではできません。有効化後の公開先は `https://<ユーザー名>.github.io/shopping-list/` です。
+
+## Capacitor 化の予定メモ
+- `npm i @capacitor/core @capacitor/cli` → `npx cap init`、`webDir` は `dist`。
+- iOS/Android を追加し、`npm run build && npx cap sync`。
+- 音声入力は WebView の Web Speech API が使えない場合があるので、ネイティブの音声認識プラグインへの差し替えを検討。
+- localStorage は端末の掃除で消えうるため、書き出し機能の案内を残す（将来は Preferences プラグインへ）。
+
+## データについて
+すべて端末の localStorage（キー `kaimono-list-v1`）に保存されます。外部へ送信しません。機種変更のときは、マイページの書き出し／取り込みを使ってください。
