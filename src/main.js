@@ -4,8 +4,9 @@ import * as S from './state/store.js';
 import { renderList } from './ui/list.js';
 import { renderRegular } from './ui/regular.js';
 import { renderMypage } from './ui/mypage.js';
-import { addSheetHtml, boughtSheetHtml, storePills, recentCards } from './ui/sheets.js';
+import { addSheetHtml, boughtSheetHtml, editSheetHtml, storePills, recentCards } from './ui/sheets.js';
 import { icon } from './lib/icons.js';
+import { parsePrice } from './lib/price.js';
 import { parseSpoken, speechSupported, listen } from './lib/speech.js';
 
 let state = S.pruneBought(S.load());
@@ -81,6 +82,19 @@ function openBoughtSheet() {
   ui.sheet = 'bought';
   overlay.innerHTML = boughtSheetHtml(state, S.boughtToday(state));
 }
+function openEditSheet(id) {
+  const item = state.items.find((i) => i.id === id);
+  if (!item) return;
+  ui.sheet = 'edit';
+  overlay.innerHTML = editSheetHtml(state, item);
+  overlay.querySelector('#edit-price').focus();
+}
+function saveEdit(id) {
+  const p = parsePrice(overlay.querySelector('#edit-price').value);
+  if (!p.ok) { toast('値段は0以上の数字で入れてください'); return; }
+  commit(S.setItemPrice(state, id, p.value));
+  closeSheet();
+}
 function closeSheet() {
   stopListen?.();
   ui.sheet = null;
@@ -90,14 +104,18 @@ function closeSheet() {
 function addFromSheet() {
   const input = overlay.querySelector('#add-input');
   const memoInput = overlay.querySelector('#memo-input');
+  const priceInput = overlay.querySelector('#price-input');
   const name = input.value.trim();
   if (!name) { input.focus(); return; }
-  const r = S.addItem(state, { name, storeId: selectedStore(), memo: ui.memoOpen ? memoInput.value : '' });
+  const price = parsePrice(priceInput.value);
+  if (!price.ok) { toast('値段は0以上の数字で入れてください'); priceInput.focus(); return; }
+  const r = S.addItem(state, { name, storeId: selectedStore(), memo: ui.memoOpen ? memoInput.value : '', price: price.value });
   state = S.setSetting(r.state, 'lastStoreId', selectedStore());
   S.save(state);
   ui.sheetAdded.push(r.item.id);
   input.value = '';
   memoInput.value = '';
+  priceInput.value = '';
   ui.memoOpen = false;
   render();
   refreshAddSheet();
@@ -178,6 +196,8 @@ const actions = {
   'open-add': openAddSheet,
   'open-bought': openBoughtSheet,
   'close-sheet': closeSheet,
+  'edit-item': openEditSheet,
+  'save-edit': saveEdit,
   'pick-store': (id) => { ui.sheetStore = id; refreshAddSheet(); overlay.querySelector('#add-input').focus(); },
   add: addFromSheet,
   'toggle-memo': () => { ui.memoOpen = !ui.memoOpen; refreshAddSheet(); overlay.querySelector(ui.memoOpen ? '#memo-input' : '#add-input').focus(); },
@@ -227,7 +247,8 @@ document.addEventListener('click', (e) => {
 });
 
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && !e.isComposing && e.target.matches('#add-input, #memo-input')) { e.preventDefault(); addFromSheet(); }
+  if (e.key === 'Enter' && !e.isComposing && e.target.matches('#add-input, #memo-input, #price-input')) { e.preventDefault(); addFromSheet(); }
+  if (e.key === 'Enter' && !e.isComposing && e.target.id === 'edit-price') { e.preventDefault(); saveEdit(overlay.querySelector('[data-action="save-edit"]').dataset.id); }
   if (e.key === 'Escape' && ui.sheet) closeSheet();
 });
 

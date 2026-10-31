@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { priceKey } from '../src/lib/price.js';
 import { build, serve, launch, root } from './lib.mjs';
 
 build();
@@ -62,6 +63,30 @@ scenarios['08-list-max-aisle'] = { data: { ...mk(twenty), settings: { aisleOrder
 scenarios['09-bought-sheet'] = { data: scenarios['04-aisle-on'].data, run: (page) => page.click('.done-bar') };
 scenarios['10-list-max-scrolled'] = {
   data: mk(twenty), run: (page) => page.evaluate(() => { const m = document.querySelector('main'); m.scrollTop = m.scrollHeight; }),
+};
+
+// 値段メモ: 値段あり・なし・前回のみ・両方・長い名前
+const withPrice = (x, price) => ({ ...x, price });
+const priceData = mk([
+  withPrice(it('牛乳', 'aeon'), 198),
+  it('卵', 'aeon', 'Mサイズ'),
+  withPrice(it('絹ごし豆腐', 'aeon'), 1280),
+  withPrice(it('とても長い名前のおいしいプレミアム国産きめ細かな絹ごし豆腐（大容量パック）', 'aeon', '冷蔵コーナーの奥'), 12800),
+  it('食パン', 'aeon'),
+  withPrice(it('柔軟剤', 'matsukiyo', 'つめかえ用'), 458),
+  it('歯ブラシ', 'matsukiyo'),
+], { priceBook: {
+  [priceKey('aeon', '牛乳')]: 188, [priceKey('aeon', '食パン')]: 1280, [priceKey('aeon', '絹ごし豆腐')]: 98,
+  [priceKey('aeon', 'とても長い名前のおいしいプレミアム国産きめ細かな絹ごし豆腐（大容量パック）')]: 1234567,
+  [priceKey('matsukiyo', '歯ブラシ')]: 330,
+} });
+scenarios['11-price'] = { data: priceData };
+scenarios['12-price-aisle-sheet'] = {
+  data: { ...priceData, settings: { aisleOrder: true, lastStoreId: 'aeon' } },
+  run: (page) => page.click('[data-action="open-add"]').then(async () => { await page.fill('#add-input', 'ヨーグルト'); await page.fill('#price-input', '１２８円'); }),
+};
+scenarios['13-price-edit-sheet'] = {
+  data: priceData, run: (page) => page.locator('.row', { hasText: '牛乳' }).locator('.nm').click(),
 };
 
 for (const [name, sc] of Object.entries(scenarios)) {

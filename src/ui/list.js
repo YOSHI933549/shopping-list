@@ -1,5 +1,7 @@
 import { icon, itemIcon } from '../lib/icons.js';
 import { categorize, aisleIndex } from '../lib/categorize.js';
+import { formatYen } from '../lib/price.js';
+import { lastPrice } from '../state/store.js';
 import { esc } from './util.js';
 
 /** 表示用に「お店ごと」へまとめる（空のお店は出さない）。 */
@@ -28,9 +30,16 @@ export function storesWithItems(state) {
   return state.stores.filter((s) => state.items.some((i) => i.storeId === s.id));
 }
 
-function row(it) {
+function priceLine(state, it) {
+  const prev = lastPrice(state, it.storeId, it.name);
+  const cur = Number.isInteger(it.price) ? `<span class="cur">${formatYen(it.price)}</span>` : '';
+  const old = prev != null ? `<span class="prev">前回${formatYen(prev)}</span>` : '';
+  return cur || old ? `<span class="price">${cur}${old}</span>` : '';
+}
+
+function row(state, it) {
   const memo = it.memo ? `<span class="memo">メモ：${esc(it.memo)}</span>` : '';
-  return `<div class="row" data-row="${esc(it.id)}">${itemIcon(it.name)}<div class="nm">${esc(it.name)}${memo}</div>` +
+  return `<div class="row" data-row="${esc(it.id)}">${itemIcon(it.name)}<div class="nm" data-action="edit-item" data-id="${esc(it.id)}">${esc(it.name)}${memo}${priceLine(state, it)}</div>` +
     `<button class="ck" data-action="check" data-id="${esc(it.id)}" aria-label="${esc(it.name)}を買った"></button></div>`;
 }
 
@@ -43,8 +52,8 @@ export function renderList(state, ui, { speech, boughtCount }) {
   const groups = groupByStore(state, filter);
   const cards = groups.map(({ store, items }) => {
     const body = aisle
-      ? groupByAisle(items).map((g) => `<div class="aisle">${esc(g.aisle)}</div>${g.items.map(row).join('')}`).join('')
-      : items.map(row).join('');
+      ? groupByAisle(items).map((g) => `<div class="aisle">${esc(g.aisle)}</div>${g.items.map((it) => row(state, it)).join('')}`).join('')
+      : items.map((it) => row(state, it)).join('');
     return `<section class="card" data-store="${esc(store.id)}"><div class="store">${esc(store.name)}<small>${items.length}品</small></div>${body}</section>`;
   }).join('');
   const empty = `<div class="empty">${icon('list', 56)}<b>リストは空っぽです</b><p>右下の赤いペンのボタンを押して、<br>買いたいものを書き足してみよう。</p></div>`;

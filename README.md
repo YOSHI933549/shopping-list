@@ -7,6 +7,7 @@
 - **入力して追加**: お店を選んで入力、Enter で連続追加。直近3件の「取り消す」、＋メモ付き。
 - **話して追加**: マイクボタン（Web Speech API・ja-JP）。「牛乳、卵、パン」「豆腐と納豆」のように区切って複数追加。非対応の端末ではマイクを隠します。
 - **定期購入品**: よく買う品を登録して「リストへ」。すでにあれば知らせます。
+- **値段メモ**: 追加シートの「値段（円）」（全角・「¥」「円」「,」も可）や、行の品名タップで値段を記録。**買った（チェックした）ときに**お店×商品名ごとに覚え、次に同じお店・同じ品をリストに入れると「前回1,280円」と小さく表示します（今回の値段があれば「198円」も）。
 - **マイページ**: お店の追加・名前変更・並べ替え・削除（品物は「未設定」へ移動）、JSON の書き出し（ファイル保存＋コピー用テキスト）と取り込み（上書き前に確認）。
 
 ## 使い方
@@ -32,12 +33,10 @@ npm run shots     # 390x844 @3x のスクリーンショットを shots/ に出�
 ### 売り場の分類について
 品名を正規化（NFKC・小文字・カタカナ→ひらがな）して、完全一致 → 最長の部分一致 → 「その他」の順で判定します。「豆乳」は牛乳の隣に置かれることが多いので「乳製品・卵」にしています。辞書は `src/data/aisles.js` に追記できます。
 
-## GitHub Pages 公開
-`vite.config.js` の `base` は `'./'` です。ビルド後の JS・CSS・フォント参照はすべて相対パスになるので、同じ `dist/` が `https://<ユーザー名>.github.io/shopping-list/`（末尾スラッシュ付き）でも、ローカルの `preview` でも、Capacitor でも動きます。
-
-`.github/workflows/pages.yml` は `main` への push（と手動実行）で `npm ci` → `npm run check` → `npm run build` を行い、`dist/` を `actions/upload-pages-artifact` と `actions/deploy-pages` で公開します。
-
-初回だけ、リポジトリの Settings → Pages → Build and deployment → Source を **GitHub Actions** にしてください。この切り替えはワークフローだけではできません。有効化後の公開先は `https://<ユーザー名>.github.io/shopping-list/` です。
+## GitHub Pages 公開の手順（説明のみ・まだ実施していません）
+1. `npm run build` で `dist/` を作る（`base: './'` なのでサブパスでも動きます）。
+2. `dist/` の中身を Pages の公開ブランチ（例: `gh-pages`）か、GitHub Actions の Pages デプロイで公開する。
+3. 公開後、`https://<ユーザー名>.github.io/<リポジトリ名>/` で開けることを確認する。
 
 ## Capacitor 化の予定メモ
 - `npm i @capacitor/core @capacitor/cli` → `npx cap init`、`webDir` は `dist`。

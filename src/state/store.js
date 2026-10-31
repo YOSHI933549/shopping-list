@@ -1,3 +1,5 @@
+import { parsePrice, priceKey } from '../lib/price.js';
+
 // 状態の純粋な操作 + localStorage への保存。操作関数は新しい state を返す（元は変更しない）。
 export const STORAGE_KEY = 'kaimono-list-v1';
 export const UNSET_ID = 'unset';
@@ -17,6 +19,7 @@ export function initialState() {
     items: [],
     bought: [],
     regulars: [],
+    priceBook: {},
     settings: { aisleOrder: false, lastStoreId: UNSET_ID },
   };
 }
@@ -38,11 +41,11 @@ export function storeName(state, id) {
 }
 
 // ---- 品物 ----
-export function addItem(state, { name, storeId, memo = '' }, now = new Date()) {
+export function addItem(state, { name, storeId, memo = '', price = null }, now = new Date()) {
   const n = String(name ?? '').trim();
   if (!n) return { state, item: null };
   const sid = state.stores.some((s) => s.id === storeId) ? storeId : UNSET_ID;
-  const item = { id: newId(), name: n, storeId: sid, memo: String(memo ?? '').trim(), addedAt: now.toISOString() };
+  const item = { id: newId(), name: n, storeId: sid, memo: String(memo ?? '').trim(), price: parsePrice(price).value ?? null, addedAt: now.toISOString() };
   return { state: { ...state, items: [...state.items, item] }, item };
 }
 
@@ -55,7 +58,26 @@ export function checkItem(state, id, now = new Date()) {
   const item = state.items.find((i) => i.id === id);
   if (!item) return state;
   const b = { ...item, boughtAt: now.toISOString(), boughtDate: localDate(now) };
-  return { ...state, items: state.items.filter((i) => i.id !== id), bought: [...state.bought, b] };
+  return { ...recordPrice(state, item), items: state.items.filter((i) => i.id !== id), bought: [...state.bought, b] };
+}
+
+/** 値段を変更する（null で値段なし）。不正な値は無視。 */
+export function setItemPrice(state, id, price) {
+  const p = parsePrice(price);
+  if (!p.ok || !state.items.some((i) => i.id === id)) return state;
+  return { ...state, items: state.items.map((i) => (i.id === id ? { ...i, price: p.value } : i)) };
+}
+
+/** 値段付きの品物なら priceBook（お店×商品名）に記録する。購入（チェック）時に呼ぶ。 */
+export function recordPrice(state, item) {
+  if (!Number.isInteger(item.price)) return state;
+  return { ...state, priceBook: { ...state.priceBook, [priceKey(item.storeId, item.name)]: item.price } };
+}
+
+/** 前回の値段。なければ null。 */
+export function lastPrice(state, storeId, name) {
+  const v = state.priceBook?.[priceKey(storeId, name)];
+  return Number.isInteger(v) ? v : null;
 }
 
 /** 戻す */
@@ -104,6 +126,7 @@ export function deleteStore(state, id) {
     items: state.items.map(mv),
     bought: state.bought.map(mv),
     regulars: state.regulars.map(mv),
+    priceBook: Object.fromEntries(Object.entries(state.priceBook ?? {}).filter(([k]) => !k.startsWith(`${id}\u0000`))),
     settings: { ...state.settings, lastStoreId: state.settings.lastStoreId === id ? UNSET_ID : state.settings.lastStoreId },
   };
 }
@@ -175,13 +198,19 @@ export function validateState(data) {
   const settings = isObj(data.settings) ? data.settings : {};
   let stores = data.stores.map((s) => ({ id: s.id, name: s.name }));
   if (!ids.has(UNSET_ID)) stores = [...stores, { id: UNSET_ID, name: '未設定' }];
-  const fix = (x) => ({ ...x, memo: isStr(x.memo) ? x.memo : '', storeId: ids.has(x.storeId) || x.storeId === UNSET_ID ? x.storeId : UNSET_ID });
+  const fixPrice = (v) => (Number.isInteger(v) && v >= 0 ? v : null);
+  // priceBook は v1 の旧データには無い。無ければ空で補い、あれば不正な値だけ捨てる
+  const priceBook = Object.fromEntries(
+    Object.entries(isObj(data.priceBook) ? data.priceBook : {}).filter(([, v]) => Number.isInteger(v) && v >= 0),
+  );
+  const fix = (x) => ({ ...x, price: fixPrice(x.price), memo: isStr(x.memo) ? x.memo : '', storeId: ids.has(x.storeId) || x.storeId === UNSET_ID ? x.storeId : UNSET_ID });
   const state = {
     version: VERSION,
     stores,
     items: data.items.map(fix),
     bought: data.bought.map(fix),
     regulars: data.regulars.map(fix),
+    priceBook,
     settings: { aisleOrder: !!settings.aisleOrder, lastStoreId: isStr(settings.lastStoreId) ? settings.lastStoreId : UNSET_ID },
   };
   return { ok: true, state };

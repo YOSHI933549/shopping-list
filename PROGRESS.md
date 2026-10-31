@@ -18,8 +18,9 @@
 - 辞書に「しゃけ」を追加（テストも追加）。
 - 未 push・リモートなし。次: よしぞうさんの確認 → GitHub リポジトリ作成と Pages 公開は承認後。
 
-## 2026-10-31 リポジトリ取り込み
-- `main` は README 1行（`# shopping-list`）の初期コミットのまま。v1 は別ブランチ。
-- この環境で再実行: `npm run check` 114件 OK、`npm run build` OK、`npm run e2e` 18ステップ OK。辞書・画面の挙動は変えていない。
-- `.github/workflows/pages.yml` を追加。`base: './'` のまま（`/shopping-list/` では相対パスが解決する）。
-- Pages の Source を GitHub Actions にする操作は未実施（オーナー作業）。
+## 2026-10-31 値段メモ欄の追加
+- 追加: `src/lib/price.js`（parsePrice / formatYen / priceKey）、store に `priceBook`（キー=storeId+NUL+正規化した品名）、`setItemPrice` / `recordPrice` / `lastPrice`。品物に `price`（整数 or null）。
+- 記録のタイミングは「購入（チェック）時」（追加しただけでは記録しない。「前回」と「今回」が同時に同じ値になるのを避けるため）。値段編集は行の品名タップ→編集シート。
+- 互換: STORAGE_KEY・VERSION は据え置き。読み込み時(validateState)に priceBook 無し→空で補い、items 等は消さない。お店削除時はそのお店の priceBook も削除。
+- 結果: `npm run check` 147 tests OK（+33）/ `npm run build` OK / `npm run e2e` 27 steps OK（+9）/ `npm run shots` 13枚。11-price・12-price-aisle-sheet・13-price-edit-sheet を目視確認（重なり・文字切れ・豆腐文字なし。長い名前＋値段も折り返して収まる）。
+- 未 commit / 未 push。
