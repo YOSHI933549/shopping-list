@@ -138,6 +138,66 @@ try {
   await page.click('.tab >> text=買い物リスト');
   assert.ok(await page.locator('.row').count() >= 2); ok('書き出し・不正データ拒否・取り込み');
 
+  // 値段メモ
+  const addWithPrice = async (store, name, price) => {
+    await page.click('[data-action="open-add"]');
+    await page.click(`[data-testid="store-pills"] >> text=${store}`);
+    await page.fill('#add-input', name);
+    await page.fill('#price-input', price);
+    await page.click('.add-b');
+  };
+  await page.click('.tab >> text=買い物リスト');
+  await addWithPrice('マツキヨ', 'お茶', 'abc');
+  assert.match(await page.locator('.toast').innerText(), /値段は0以上/);
+  assert.equal(await page.locator('#add-input').inputValue(), 'お茶'); ok('不正な値段は追加されず入力が残る');
+  await page.fill('#price-input', '¥１,２８０円');
+  assert.equal(await page.locator('#price-input').getAttribute('inputmode'), 'numeric');
+  await page.click('.add-b');
+  assert.equal(await page.locator('#price-input').inputValue(), '');
+  await page.fill('#add-input', 'とても長い名前のおいしいプレミアム国産きめ細かな絹ごし豆腐（大容量パック）');
+  await page.fill('#price-input', '98');
+  await page.click('.add-b');
+  await page.click('.sh-head >> text=閉じる');
+  const rowOf = (n) => page.locator('.row', { hasText: n });
+  assert.equal(await rowOf('お茶').locator('.cur').innerText(), '1,280円');
+  assert.equal(await rowOf('お茶').locator('.prev').count(), 0);
+  assert.equal(await rowOf('プレミアム').locator('.cur').innerText(), '98円'); ok('値段入力→リストに「1,280円」「98円」表示（前回はまだ無し）');
+  const box = await rowOf('プレミアム').boundingBox();
+  const ckBox = await rowOf('プレミアム').locator('.ck').boundingBox();
+  const priceBox = await rowOf('プレミアム').locator('.price').boundingBox();
+  assert.ok(priceBox.x + priceBox.width <= ckBox.x && priceBox.y + priceBox.height <= box.y + box.height); ok('長い商品名＋値段でも行内に収まる');
+
+  await rowOf('お茶').locator('.ck').click();
+  await page.waitForTimeout(800);
+  assert.equal(await rowOf('お茶').count(), 0); ok('値段付きの品を購入');
+  await page.reload();
+  await addWithPrice('マツキヨ', 'お茶', '');
+  await page.click('.sh-head >> text=閉じる');
+  assert.equal(await rowOf('お茶').locator('.prev').innerText(), '前回1,280円');
+  assert.equal(await rowOf('お茶').locator('.cur').count(), 0); ok('再追加で「前回1,280円」表示');
+  await page.click('[data-action="open-add"]');
+  await page.click('[data-testid="store-pills"] >> text=Amazon');
+  await page.fill('#add-input', 'お茶');
+  await page.click('.add-b');
+  await page.click('.sh-head >> text=閉じる');
+  assert.equal(await page.locator('.card', { hasText: 'Amazon' }).locator('.prev').count(), 0); ok('別のお店の同名商品には前回値段が出ない');
+  const teaRowM = page.locator('.card', { hasText: 'マツキヨ' }).locator('.row', { hasText: 'お茶' });
+  await teaRowM.locator('.nm').click();
+  await page.fill('#edit-price', '１５０');
+  await page.click('[data-action="save-edit"]');
+  assert.equal(await teaRowM.locator('.cur').innerText(), '150円'); ok('行をタップして値段を編集');
+  await page.reload();
+  await page.evaluate(() => document.fonts.ready);
+  const teaRow = page.locator('.card', { hasText: 'マツキヨ' }).locator('.row', { hasText: 'お茶' });
+  assert.equal(await teaRow.locator('.cur').innerText(), '150円');
+  assert.equal(await teaRow.locator('.prev').innerText(), '前回1,280円'); ok('リロード後も値段と前回値段が残る');
+
+  // 旧データ（priceBook なし）を読み込んでも消えない
+  await page.evaluate(() => localStorage.setItem('kaimono-list-v1', JSON.stringify({ version: 1, stores: [{ id: 'aeon', name: 'イオン' }, { id: 'unset', name: '未設定' }], items: [{ id: 'o1', name: '旧データの牛乳', storeId: 'aeon', memo: '', addedAt: '2026-10-30T00:00:00.000Z' }], bought: [], regulars: [], settings: { aisleOrder: false, lastStoreId: 'aeon' } })));
+  await page.reload();
+  assert.equal(await page.locator('.row', { hasText: '旧データの牛乳' }).count(), 1);
+  assert.equal(await page.locator('.price').count(), 0); ok('旧データ(priceBookなし)を読み込んでも品が残る');
+
   // 壊れた保存データ
   await page.evaluate(() => localStorage.setItem('kaimono-list-v1', '{oops'));
   await page.reload();
