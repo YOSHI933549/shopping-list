@@ -20,7 +20,7 @@ export function renderMypage(state, ui, version) {
 <form class="form" data-form="store" style="margin-top:10px"><div class="line"><input class="field" name="name" placeholder="新しいお店の名前" autocomplete="off"><button class="btn red" type="submit">追加</button></div></form>
 <p class="note">お店を削除すると、そのお店の品物は「未設定」に移ります。</p>
 <div class="btnrow"><button class="btn" data-action="store-restore">初期のお店を戻す</button></div></section>
-<section class="sec"><h2>データの書き出し<small>バックアップ用</small></h2>
+<section class="sec" id="export-sec"><h2>データの書き出し<small>バックアップ用</small></h2>
 <div class="btnrow" style="margin-top:0"><button class="btn" data-action="export-file">ファイルに保存</button><button class="btn" data-action="export-show">テキストを表示</button></div>
 ${ui.exportText ? `<textarea class="field" id="export-text" readonly style="margin-top:8px">${esc(ui.exportText)}</textarea><div class="btnrow"><button class="btn sm" data-action="export-copy">コピー</button></div>` : ''}
 <p class="note">iPhone ではファイル保存がうまくいかないことがあります。その場合はテキストをコピーして、メモなどに貼って保管してください。</p></section>

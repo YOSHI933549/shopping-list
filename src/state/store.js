@@ -1,7 +1,10 @@
 import { parsePrice, priceKey } from '../lib/price.js';
+import { normalize } from '../lib/categorize.js';
+import { stripSensitiveLines } from '../lib/receipt.js';
+import { readYen } from '../lib/receiptDraft.js';
 import {
   HISTORY_KEY, emptyHistory, copyPlain, sanitizeHistory, migratePurchases, unionHistory,
-  appendPurchase, dropPurchase, priceFromLines,
+  appendPurchase, dropPurchase, priceFromLines, isDate,
 } from '../lib/history.js';
 
 // 状態の純粋な操作 + localStorage への保存。操作関数は新しい state を返す（元は変更しない）。
@@ -206,6 +209,128 @@ export function regularToList(state, id, now = new Date()) {
 
 export function setSetting(state, key, value) {
   return { ...state, settings: { ...state.settings, [key]: value } };
+}
+
+/** 書き出しをした印。促しは、この日時よりあとで枚数と日数がたまったときだけ出す。 */
+export function markExported(state, now = new Date()) {
+  return setSetting(setSetting(state, 'lastExportAt', now.toISOString()), 'lastExportDate', localDate(now));
+}
+
+function bookPriceOf(qty, unitPrice, amount) {
+  if (unitPrice != null && unitPrice >= 0) return unitPrice;
+  if (qty === 1 && amount != null && amount >= 0) return amount;
+  return null;
+}
+
+/**
+ * 確認画面の下書きを、レシート1件と明細にして履歴に足す。
+ * 入れ方はレシート（source: 'receipt'）。会員番号らしい行は保存前に落とす。
+ * リストの同じお店・同じ品（normalize の完全一致）は買った扱いにする。
+ * 同じ日に丸で押した同じ品は、その明細を外してレシートの行を正にする。
+ */
+export function saveReceipt(state, draft, now = new Date()) {
+  const ready = migratePurchases(state);
+  const storeId = draft?.storeId;
+  if (typeof storeId !== 'string' || !storeId || storeId === UNSET_ID || !ready.stores.some((s) => s.id === storeId)) {
+    return { state: ready, saved: false, reason: 'store' };
+  }
+  const date = isDate(draft.date) ? draft.date : localDate(now);
+  const prepared = [];
+  for (const line of draft.lines || []) {
+    if (!line || line.kind === 'unknown') continue;
+    const name = String(line.name ?? '').trim() || String(line.parsedName ?? '').trim();
+    if (!name) continue;
+    const quantity = readYen(line.quantity);
+    if (line.quantity != null && line.quantity !== '' && quantity == null) return { state: ready, saved: false, reason: 'line' };
+    const qty = quantity == null ? 1 : quantity;
+    if (qty < 1) return { state: ready, saved: false, reason: 'line' };
+    const unitPrice = readYen(line.unitPrice);
+    if (line.unitPrice != null && line.unitPrice !== '' && unitPrice == null) return { state: ready, saved: false, reason: 'line' };
+    const discountRaw = readYen(line.discount);
+    if (line.discount != null && line.discount !== '' && discountRaw == null) return { state: ready, saved: false, reason: 'line' };
+    const discount = discountRaw == null ? 0 : discountRaw;
+    const amount = readYen(line.amount, { negative: true });
+    if (amount == null) return { state: ready, saved: false, reason: 'line' };
+    prepared.push({ line, name, qty, unitPrice, discount, amount });
+  }
+  if (!prepared.length) return { state: ready, saved: false, reason: 'empty' };
+
+  const receiptId = newId();
+  const savedAt = now.toISOString();
+  const time = typeof draft.time === 'string' && /^\d{2}:\d{2}$/.test(draft.time) ? draft.time : null;
+  const total = Number.isInteger(draft.total) ? draft.total : null;
+  const tax = draft.tax === '税込' || draft.tax === '税抜' || draft.tax === '不明' ? draft.tax : '不明';
+  const receipt = {
+    id: receiptId,
+    storeId,
+    date,
+    time,
+    total,
+    tax,
+    source: 'receipt',
+    text: stripSensitiveLines(draft.text || ''),
+    savedAt,
+  };
+
+  let historyLines = ready.history.lines.slice();
+  let items = ready.items.slice();
+  let bought = ready.bought.slice();
+  const priceBook = { ...(ready.priceBook || {}) };
+  const added = [];
+
+  for (const row of prepared) {
+    const norm = normalize(row.name);
+    historyLines = historyLines.filter((l) => {
+      if (l.source !== 'check' || l.storeId !== storeId || l.date !== date) return true;
+      return normalize(l.name) !== norm;
+    });
+    const bookPrice = bookPriceOf(row.qty, row.unitPrice, row.amount);
+    const matches = items.filter((i) => i.storeId === storeId && normalize(i.name) === norm);
+    for (const item of matches) {
+      const price = bookPrice != null ? bookPrice : (Number.isInteger(item.price) && item.price >= 0 ? item.price : null);
+      bought.push({ ...item, price, boughtAt: savedAt, boughtDate: date });
+      if (price != null) priceBook[priceKey(storeId, item.name)] = price;
+    }
+    if (matches.length) {
+      const ids = new Set(matches.map((i) => i.id));
+      items = items.filter((i) => !ids.has(i.id));
+    }
+    if (bookPrice != null) priceBook[priceKey(storeId, row.name)] = bookPrice;
+    bought = bought.map((b) => {
+      if (b.storeId !== storeId || b.boughtDate !== date || normalize(b.name) !== norm || bookPrice == null) return b;
+      return { ...b, price: bookPrice };
+    });
+    added.push({
+      id: newId(),
+      receiptId,
+      itemId: null,
+      name: row.name,
+      raw: typeof row.line.raw === 'string' ? row.line.raw : '',
+      storeId,
+      date,
+      boughtAt: savedAt,
+      price: bookPrice != null ? bookPrice : (row.amount >= 0 ? row.amount : null),
+      unitPrice: row.unitPrice,
+      quantity: row.qty,
+      discount: row.discount,
+      amount: row.amount,
+      volumeMl: row.line.volumeMl ?? null,
+      packCount: row.line.packCount ?? null,
+      packUnit: row.line.packUnit ?? null,
+      memo: '',
+      source: 'receipt',
+    });
+  }
+
+  const next = {
+    ...ready,
+    items,
+    bought,
+    priceBook,
+    history: { ...ready.history, version: 1, receipts: [...(ready.history.receipts || []), receipt], lines: [...historyLines, ...added] },
+    settings: { ...ready.settings, lastStoreId: storeId },
+  };
+  return { state: next, saved: true, receipt };
 }
 
 // ---- 検証・読み込み・書き出し ----

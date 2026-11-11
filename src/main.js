@@ -5,14 +5,17 @@ import { renderList } from './ui/list.js';
 import { renderRegular } from './ui/regular.js';
 import { renderMypage } from './ui/mypage.js';
 import { addSheetHtml, boughtSheetHtml, editSheetHtml, storePills, recentCards } from './ui/sheets.js';
+import { confirmSheetHtml, pasteSheetHtml, totalsHtml } from './ui/receipt.js';
 import { icon } from './lib/icons.js';
 import { parsePrice } from './lib/price.js';
+import { parseReceipt } from './lib/receipt.js';
+import { buildReceiptDraft, editLine, exportNudge, keyboardInset, namesForStore } from './lib/receiptDraft.js';
 import { parseSpoken, speechSupported, listen } from './lib/speech.js';
 
 const opened = S.load();
 let state = opened.problem?.scope === 'list' ? opened.state : S.pruneBought(opened.state);
 let loadProblem = opened.problem;
-const ui = { tab: 'list', filter: 'all', sheet: null, sheetStore: null, sheetAdded: [], memoOpen: false, exportText: '' };
+const ui = { tab: 'list', filter: 'all', sheet: null, sheetStore: null, sheetAdded: [], memoOpen: false, exportText: '', receipt: null, nudge: '' };
 const pending = new Set();
 const speech = speechSupported();
 let stopListen = null;
@@ -55,7 +58,7 @@ function loadNoticeHtml(problem) {
 function render() {
   const sc = view.querySelector('[data-scroll]')?.scrollTop ?? 0;
   const boughtCount = S.boughtToday(state).length;
-  if (ui.tab === 'list') view.innerHTML = renderList(state, ui, { speech, boughtCount }).html;
+  if (ui.tab === 'list') view.innerHTML = renderList(state, ui, { speech, boughtCount, nudge: ui.nudge }).html;
   else if (ui.tab === 'regular') view.innerHTML = renderRegular(state, ui);
   else view.innerHTML = renderMypage(state, ui, version);
   const mainEl = view.querySelector('main');
@@ -121,7 +124,87 @@ function saveEdit(id) {
 function closeSheet() {
   stopListen?.();
   ui.sheet = null;
+  ui.receipt = null;
   overlay.innerHTML = '';
+}
+
+function openReceiptPaste() {
+  ui.sheet = 'receipt-paste';
+  ui.receipt = null;
+  overlay.innerHTML = pasteSheetHtml();
+  overlay.querySelector('#receipt-text').focus();
+}
+
+function fitName(el) {
+  if (!el) return;
+  el.style.height = 'auto';
+  el.style.height = `${el.scrollHeight}px`;
+}
+
+function showReceiptConfirm() {
+  ui.sheet = 'receipt-confirm';
+  const sc = overlay.querySelector('.rbody')?.scrollTop ?? overlay.querySelector('.sheet')?.scrollTop ?? 0;
+  overlay.innerHTML = confirmSheetHtml(state, ui.receipt);
+  overlay.querySelectorAll('.rname').forEach(fitName);
+  const body = overlay.querySelector('.rbody');
+  const sheet = overlay.querySelector('.sheet');
+  if (body) body.scrollTop = sc;
+  else if (sheet) sheet.scrollTop = sc;
+}
+
+function readReceiptText() {
+  const text = overlay.querySelector('#receipt-text')?.value ?? '';
+  if (!text.trim()) { toast('文字を貼ってください'); return; }
+  ui.receipt = buildReceiptDraft(parseReceipt(text), state, S.localDate());
+  showReceiptConfirm();
+}
+
+function syncReceiptFromDom() {
+  if (ui.sheet !== 'receipt-confirm' || !ui.receipt) return;
+  const date = overlay.querySelector('#receipt-date');
+  if (date) ui.receipt.date = date.value;
+  for (const line of ui.receipt.lines) {
+    const row = overlay.querySelector(`[data-line="${CSS.escape(line.key)}"]`);
+    if (!row || line.kind !== 'item') continue;
+    const take = (sel) => row.querySelector(sel)?.value;
+    let next = line;
+    const name = take('.rname');
+    const qty = take('.rqty');
+    const unit = take('.runit');
+    const amount = take('.ramount');
+    const disc = take('.rdisc');
+    if (name != null && name !== line.name) next = editLine(next, 'name', name);
+    if (qty != null && String(qty) !== String(line.quantity ?? '')) next = editLine(next, 'quantity', qty);
+    if (unit != null && String(unit) !== String(line.unitPrice ?? '')) next = editLine(next, 'unitPrice', unit);
+    if (disc != null && String(disc) !== String(line.discount ?? '')) next = editLine(next, 'discount', disc);
+    if (amount != null && String(amount) !== String(next.amount ?? '')) next = editLine(next, 'amount', amount);
+    Object.assign(line, next);
+  }
+}
+
+function refreshReceiptTotals() {
+  const el = overlay.querySelector('[data-testid="receipt-totals"]');
+  if (el && ui.receipt) el.innerHTML = totalsHtml(ui.receipt);
+}
+
+function saveReceiptFromSheet() {
+  if (listBlocked()) { toast('読めなかったデータが残っています。先に知らせを確認してください'); return; }
+  syncReceiptFromDom();
+  const result = S.saveReceipt(state, ui.receipt);
+  if (!result.saved) {
+    toast(result.reason === 'store' ? 'お店を選んでください' : '数量と金額を確認してください');
+    return;
+  }
+  const nudge = exportNudge(result.state);
+  ui.nudge = nudge ? nudge.message : '';
+  closeSheet();
+  commit(result.state);
+}
+
+function rememberExport() {
+  state = S.markExported(state);
+  S.save(state);
+  ui.nudge = '';
 }
 
 function addFromSheet() {
@@ -236,7 +319,7 @@ function ackLoad() {
 }
 
 const actions = {
-  tab: (id) => { ui.tab = id; ui.exportText = ''; render(); },
+  tab: (id) => { ui.tab = id; ui.exportText = ''; ui.nudge = ''; render(); },
   'ack-load': () => ackLoad(),
   'copy-unreadable': async () => {
     const raw = loadProblem?.raw;
@@ -248,6 +331,27 @@ const actions = {
   aisle: () => commit(S.setSetting(state, 'aisleOrder', !state.settings.aisleOrder)),
   check: checkRow,
   'open-add': openAddSheet,
+  'open-receipt': openReceiptPaste,
+  'receipt-read': readReceiptText,
+  'pick-receipt-store': (id) => {
+    if (!ui.receipt) return;
+    syncReceiptFromDom();
+    ui.receipt = namesForStore(ui.receipt, state, id);
+    showReceiptConfirm();
+  },
+  'receipt-drop': (id) => {
+    if (!ui.receipt) return;
+    syncReceiptFromDom();
+    ui.receipt.lines = ui.receipt.lines.filter((line) => line.key !== id);
+    showReceiptConfirm();
+  },
+  'receipt-save': saveReceiptFromSheet,
+  'open-export': () => {
+    ui.tab = 'mypage';
+    ui.nudge = '';
+    render();
+    view.querySelector('#export-sec')?.scrollIntoView({ block: 'start' });
+  },
   'open-bought': openBoughtSheet,
   'close-sheet': closeSheet,
   'edit-item': openEditSheet,
@@ -280,11 +384,13 @@ const actions = {
     commit(S.deleteStore(state, id));
   },
   'store-restore': () => { commit(S.restoreDefaultStores(state)); toast('初期のお店を戻しました'); },
-  'export-file': () => { download(`kaimono-list-${S.localDate()}.json`, S.exportJSON(state)); },
-  'export-show': () => { ui.exportText = S.exportJSON(state); render(); },
+  'export-file': () => { rememberExport(); download(`kaimono-list-${S.localDate()}.json`, S.exportJSON(state)); render(); },
+  'export-show': () => { rememberExport(); ui.exportText = S.exportJSON(state); render(); },
   'export-copy': async () => {
     const ta = document.getElementById('export-text');
     try { await navigator.clipboard.writeText(ta.value); toast('コピーしました'); } catch { ta.select(); toast('選択しました。コピーしてください'); }
+    rememberExport();
+    render();
   },
   'import-run': () => {
     const t = document.getElementById('import-text').value.trim();
@@ -300,8 +406,49 @@ document.addEventListener('click', (e) => {
   if (fn) fn(el.dataset.id, el);
 });
 
+document.addEventListener('input', (e) => {
+  if (ui.sheet !== 'receipt-confirm' || !ui.receipt) return;
+  const row = e.target.closest?.('[data-line]');
+  if (!row) return;
+  const line = ui.receipt.lines.find((l) => l.key === row.dataset.line);
+  if (!line || line.kind !== 'item') return;
+  const field = e.target.classList.contains('rname') ? 'name'
+    : e.target.classList.contains('rqty') ? 'quantity'
+    : e.target.classList.contains('runit') ? 'unitPrice'
+    : e.target.classList.contains('ramount') ? 'amount'
+    : e.target.classList.contains('rdisc') ? 'discount' : '';
+  if (!field) return;
+  const next = editLine(line, field, e.target.value);
+  Object.assign(line, next);
+  if (field === 'name') fitName(e.target);
+  if (field !== 'name' && field !== 'amount' && !line.amountTouched) {
+    const amount = row.querySelector('.ramount');
+    if (amount && String(amount.value) !== String(line.amount ?? '')) amount.value = line.amount ?? '';
+  }
+  refreshReceiptTotals();
+});
+
+document.addEventListener('focusin', (e) => {
+  if (!ui.sheet || !overlay.contains(e.target)) return;
+  setTimeout(() => e.target.scrollIntoView?.({ block: 'nearest' }), 80);
+});
+
+function bindKeyboardInset() {
+  const apply = () => {
+    const vv = window.visualViewport;
+    const inset = vv ? keyboardInset(window.innerHeight, vv.height, vv.offsetTop) : 0;
+    document.documentElement.style.setProperty('--kb', `${inset}px`);
+  };
+  apply();
+  window.visualViewport?.addEventListener('resize', apply);
+  window.visualViewport?.addEventListener('scroll', apply);
+  window.addEventListener('resize', apply);
+}
+bindKeyboardInset();
+
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.isComposing && e.target.matches('#add-input, #memo-input, #price-input')) { e.preventDefault(); addFromSheet(); }
+  if (e.key === 'Enter' && !e.isComposing && e.target.classList?.contains('rname')) e.preventDefault();
   if (e.key === 'Enter' && !e.isComposing && e.target.id === 'edit-price') { e.preventDefault(); saveEdit(overlay.querySelector('[data-action="save-edit"]').dataset.id); }
   if (e.key === 'Escape' && ui.sheet) closeSheet();
 });
@@ -323,6 +470,17 @@ document.addEventListener('submit', (e) => {
 });
 
 document.addEventListener('change', async (e) => {
+  if (e.target.id === 'receipt-date' && ui.receipt) ui.receipt.date = e.target.value;
+  if (e.target.classList?.contains('rpick') && ui.receipt) {
+    const row = e.target.closest('[data-line]');
+    const line = ui.receipt.lines.find((l) => l.key === row?.dataset.line);
+    if (line && e.target.value) {
+      Object.assign(line, editLine(line, 'name', e.target.value));
+      const name = row.querySelector('.rname');
+      if (name) { name.value = line.name; fitName(name); }
+      refreshReceiptTotals();
+    }
+  }
   if (e.target.id === 'import-file' && e.target.files[0]) {
     const text = await e.target.files[0].text();
     e.target.value = '';

@@ -49,7 +49,7 @@ function row(state, it, now) {
     `<button class="ck" data-action="check" data-id="${esc(it.id)}" aria-label="${esc(it.name)}を買った"></button></div>`;
 }
 
-export function renderList(state, ui, { speech, boughtCount, now = new Date() }) {
+export function renderList(state, ui, { speech, boughtCount, now = new Date(), nudge = '' }) {
   const stores = storesWithItems(state);
   const filter = stores.some((s) => s.id === ui.filter) ? ui.filter : 'all';
   const aisle = !!state.settings.aisleOrder;
@@ -63,11 +63,13 @@ export function renderList(state, ui, { speech, boughtCount, now = new Date() })
     return `<section class="card" data-store="${esc(store.id)}"><div class="store">${esc(store.name)}<small>${items.length}品</small></div>${body}</section>`;
   }).join('');
   const empty = `<div class="empty">${icon('list', 56)}<b>リストは空っぽです</b><p>右下の赤いペンのボタンを押して、<br>買いたいものを書き足してみよう。</p></div>`;
+  const nudgeHtml = nudge ? `<p class="nudge" data-testid="export-nudge">${esc(nudge)} <button type="button" class="nudge-go" data-action="open-export">書き出し</button></p>` : '';
   return { filter, html: `
 <header><h1>買い物リスト</h1>
 <div class="toolbar"><div class="pills" data-testid="pills">${pills}</div>
-<button class="toggle" data-action="aisle" role="switch" aria-checked="${aisle}">売り場順<span class="sw${aisle ? ' on' : ''}"></span></button></div></header>
-<main data-scroll>${cards || empty}</main>${dock(state, speech, boughtCount)}` };
+<button class="toggle" data-action="aisle" role="switch" aria-checked="${aisle}">売り場順<span class="sw${aisle ? ' on' : ''}"></span></button></div>
+<button type="button" class="receipt-open" data-action="open-receipt">レシートを読む</button></header>
+<main data-scroll>${nudgeHtml}${cards || empty}</main>${dock(state, speech, boughtCount)}` };
 }
 
 export function dock(state, speech, boughtCount = null) {
