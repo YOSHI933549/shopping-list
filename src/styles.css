@@ -38,6 +38,9 @@ main.plain{--dock:0px}
 .row .nm[data-action]{cursor:pointer}
 .row .price{display:flex;flex-wrap:wrap;gap:0 8px;font-size:12px;color:var(--ink2)}
 .row .price .cur{color:var(--ink);font-weight:600}
+.row .last{display:block;font-size:12px;color:var(--ink2);font-weight:400}
+.load-note{margin:0 0 12px;padding:10px 12px;border:1.5px dashed var(--ink);border-radius:12px 10px 13px 11px;background:rgba(255,253,248,.95);font-size:13px;line-height:1.6;color:var(--ink)}
+.load-note p{margin:0}
 .input.price{margin-top:8px}
 .input .yen{font-size:13px;color:var(--ink2);white-space:nowrap;flex:none}
 .input.price input{text-align:right}

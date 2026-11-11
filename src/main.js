@@ -9,7 +9,9 @@ import { icon } from './lib/icons.js';
 import { parsePrice } from './lib/price.js';
 import { parseSpoken, speechSupported, listen } from './lib/speech.js';
 
-let state = S.pruneBought(S.load());
+const opened = S.load();
+let state = opened.problem?.scope === 'list' ? opened.state : S.pruneBought(opened.state);
+let loadProblem = opened.problem;
 const ui = { tab: 'list', filter: 'all', sheet: null, sheetStore: null, sheetAdded: [], memoOpen: false, exportText: '' };
 const pending = new Set();
 const speech = speechSupported();
@@ -25,10 +27,29 @@ document.body.appendChild(overlay);
 
 const TABS = [['regular', 'repeat', '定期購入品'], ['list', 'list', '買い物リスト'], ['mypage', 'person', 'マイページ']];
 
+function listBlocked() {
+  return loadProblem?.scope === 'list';
+}
+
 function commit(next) {
+  if (listBlocked()) {
+    toast('読めなかったデータが残っています。先に知らせを確認してください');
+    return;
+  }
   state = next;
   S.save(state);
   render();
+}
+
+function loadNoticeHtml(problem) {
+  const historyOnly = problem.scope === 'history';
+  const text = historyOnly
+    ? '購入の履歴データを読めませんでした。元の文字は消さずに、この端末の中へ控えとして残しています。リストはこれまでどおり開いています。'
+    : '保存データを読めませんでした。元のデータは消さずに、この端末の中へ控えとして残しています。空のリストで始めると、保存場所は新しいデータで上書きされます。';
+  const buttons = historyOnly
+    ? '<button class="btn sm" data-action="ack-load">わかった</button>'
+    : `<button class="btn sm" data-action="copy-unreadable"${problem.raw ? '' : ' disabled'}>控えをコピー</button><button class="btn sm" data-action="ack-load">空のリストで始める</button>`;
+  return `<div class="load-note" role="alert" data-testid="load-note"><p>${text}</p><div class="btnrow">${buttons}</div></div>`;
 }
 
 function render() {
@@ -37,6 +58,8 @@ function render() {
   if (ui.tab === 'list') view.innerHTML = renderList(state, ui, { speech, boughtCount }).html;
   else if (ui.tab === 'regular') view.innerHTML = renderRegular(state, ui);
   else view.innerHTML = renderMypage(state, ui, version);
+  const mainEl = view.querySelector('main');
+  if (loadProblem && mainEl) mainEl.insertAdjacentHTML('afterbegin', loadNoticeHtml(loadProblem));
   const m = view.querySelector('[data-scroll]');
   if (m) m.scrollTop = sc;
   tabs.innerHTML = TABS.map(([k, ic, label]) => `<button class="tab${ui.tab === k ? ' on' : ''}" data-action="tab" data-id="${k}">${icon(ic, 26)}${label}</button>`).join('');
@@ -102,6 +125,10 @@ function closeSheet() {
 }
 
 function addFromSheet() {
+  if (listBlocked()) {
+    toast('読めなかったデータが残っています。先に知らせを確認してください');
+    return;
+  }
   const input = overlay.querySelector('#add-input');
   const memoInput = overlay.querySelector('#memo-input');
   const priceInput = overlay.querySelector('#price-input');
@@ -124,6 +151,7 @@ function addFromSheet() {
 
 // ---- 音声 ----
 function startMic(btn) {
+  if (listBlocked()) { toast('読めなかったデータが残っています。先に知らせを確認してください'); return; }
   if (!speech) { toast('この端末では音声入力が使えません'); return; }
   if (stopListen) { stopListen(); return; }
   btn.classList.add('rec');
@@ -167,9 +195,14 @@ function download(name, text) {
 }
 
 function doImport(text) {
+  if (listBlocked()) {
+    toast('読めなかったデータが残っています。先に知らせを確認してください');
+    return;
+  }
   const r = S.importJSON(text);
   if (!r.ok) { toast(`取り込めません：${r.error}`); return; }
-  const msg = `今のデータを上書きして取り込みます。\nリスト ${r.state.items.length}品 / 定期購入品 ${r.state.regulars.length}件 / お店 ${r.state.stores.length}件\nよろしいですか？`;
+  const hist = r.state.history?.lines?.length ?? 0;
+  const msg = `今のデータを上書きして取り込みます。\nリスト ${r.state.items.length}品 / 定期購入品 ${r.state.regulars.length}件 / お店 ${r.state.stores.length}件 / 購入の記録 ${hist}件\nよろしいですか？`;
   if (!window.confirm(msg)) return;
   ui.filter = 'all';
   commit(r.state);
@@ -188,8 +221,29 @@ function checkRow(id) {
   setTimeout(() => { pending.delete(id); commit(S.checkItem(state, id)); }, 650);
 }
 
+function ackLoad() {
+  if (!loadProblem) return;
+  if (loadProblem.scope === 'list') {
+    if (!window.confirm('空のリストで始めます。\n読めなかったデータは、この端末の中の控えに残ります。')) return;
+    loadProblem = null;
+    S.save(state);
+    render();
+    return;
+  }
+  loadProblem = null;
+  S.save(state);
+  render();
+}
+
 const actions = {
   tab: (id) => { ui.tab = id; ui.exportText = ''; render(); },
+  'ack-load': () => ackLoad(),
+  'copy-unreadable': async () => {
+    const raw = loadProblem?.raw;
+    if (!raw) { toast('控えが見つかりません'); return; }
+    try { await navigator.clipboard.writeText(raw); toast('控えをコピーしました'); }
+    catch { toast('コピーできませんでした'); }
+  },
   filter: (id) => { ui.filter = id; render(); },
   aisle: () => commit(S.setSetting(state, 'aisleOrder', !state.settings.aisleOrder)),
   check: checkRow,

@@ -1,7 +1,12 @@
 import { parsePrice, priceKey } from '../lib/price.js';
+import {
+  HISTORY_KEY, emptyHistory, copyPlain, sanitizeHistory, migratePurchases, unionHistory,
+  appendPurchase, dropPurchase, priceFromLines,
+} from '../lib/history.js';
 
 // 状態の純粋な操作 + localStorage への保存。操作関数は新しい state を返す（元は変更しない）。
 export const STORAGE_KEY = 'kaimono-list-v1';
+export { HISTORY_KEY };
 export const UNSET_ID = 'unset';
 export const VERSION = 1;
 
@@ -20,6 +25,7 @@ export function initialState() {
     bought: [],
     regulars: [],
     priceBook: {},
+    history: emptyHistory(),
     settings: { aisleOrder: false, lastStoreId: UNSET_ID },
   };
 }
@@ -53,12 +59,27 @@ export function removeItem(state, id) {
   return { ...state, items: state.items.filter((i) => i.id !== id) };
 }
 
-/** チェック → 買い物リストから「今日買ったもの」へ */
+/** チェック → 買い物リストから「今日買ったもの」へ。明細にも1件残す（30日では消えない）。 */
 export function checkItem(state, id, now = new Date()) {
   const item = state.items.find((i) => i.id === id);
   if (!item) return state;
+  const ready = migratePurchases(state);
   const b = { ...item, boughtAt: now.toISOString(), boughtDate: localDate(now) };
-  return { ...recordPrice(state, item), items: state.items.filter((i) => i.id !== id), bought: [...state.bought, b] };
+  const priced = recordPrice(ready, item);
+  const { id: itemId, name, storeId, memo, price, ...rest } = item;
+  const history = appendPurchase(priced.history, {
+    ...copyPlain(rest),
+    id: newId(),
+    itemId,
+    name,
+    storeId,
+    date: b.boughtDate,
+    boughtAt: b.boughtAt,
+    price: Number.isInteger(price) ? price : null,
+    memo: typeof memo === 'string' ? memo : '',
+    source: 'check',
+  });
+  return { ...priced, history, items: state.items.filter((i) => i.id !== id), bought: [...state.bought, b] };
 }
 
 /** 値段を変更する（null で値段なし）。不正な値は無視。 */
@@ -80,12 +101,22 @@ export function lastPrice(state, storeId, name) {
   return Number.isInteger(v) ? v : null;
 }
 
-/** 戻す */
+/** 戻す。対応する明細も外し、値段メモは残った明細から付け直す。 */
 export function undoBought(state, id) {
-  const b = state.bought.find((i) => i.id === id);
+  const ready = migratePurchases(state);
+  const b = ready.bought.find((i) => i.id === id);
   if (!b) return state;
   const { boughtAt, boughtDate, ...item } = b;
-  return { ...state, bought: state.bought.filter((i) => i.id !== id), items: [...state.items, item] };
+  const dropped = dropPurchase(ready.history, id);
+  let priceBook = state.priceBook;
+  if (dropped.removed) {
+    const price = priceFromLines(dropped.history.lines, item.storeId, item.name);
+    priceBook = { ...(state.priceBook || {}) };
+    const key = priceKey(item.storeId, item.name);
+    if (price == null) delete priceBook[key];
+    else priceBook[key] = price;
+  }
+  return { ...ready, bought: ready.bought.filter((i) => i.id !== id), items: [...ready.items, item], history: dropped.history, priceBook };
 }
 
 export function boughtToday(state, now = new Date()) {
@@ -196,22 +227,25 @@ export function validateState(data) {
   if (!data.bought.every((b) => okItem(b) && isStr(b.boughtDate))) return { ok: false, error: 'bought が正しくありません' };
   if (!data.regulars.every(okItem)) return { ok: false, error: 'regulars が正しくありません' };
   const settings = isObj(data.settings) ? data.settings : {};
-  let stores = data.stores.map((s) => ({ id: s.id, name: s.name }));
+  let stores = data.stores.map((s) => ({ ...copyPlain(s), id: s.id, name: s.name }));
   if (!ids.has(UNSET_ID)) stores = [...stores, { id: UNSET_ID, name: '未設定' }];
   const fixPrice = (v) => (Number.isInteger(v) && v >= 0 ? v : null);
   // priceBook は v1 の旧データには無い。無ければ空で補い、あれば不正な値だけ捨てる
   const priceBook = Object.fromEntries(
     Object.entries(isObj(data.priceBook) ? data.priceBook : {}).filter(([, v]) => Number.isInteger(v) && v >= 0),
   );
-  const fix = (x) => ({ ...x, price: fixPrice(x.price), memo: isStr(x.memo) ? x.memo : '', storeId: ids.has(x.storeId) || x.storeId === UNSET_ID ? x.storeId : UNSET_ID });
+  const fix = (x) => ({ ...copyPlain(x), price: fixPrice(x.price), memo: isStr(x.memo) ? x.memo : '', storeId: ids.has(x.storeId) || x.storeId === UNSET_ID ? x.storeId : UNSET_ID });
+  // 知っている項目だけを組み立て直すと、将来足した項目が書き出し→取り込みで消える。未知の項目は残す。
   const state = {
+    ...copyPlain(data),
     version: VERSION,
     stores,
     items: data.items.map(fix),
     bought: data.bought.map(fix),
     regulars: data.regulars.map(fix),
     priceBook,
-    settings: { aisleOrder: !!settings.aisleOrder, lastStoreId: isStr(settings.lastStoreId) ? settings.lastStoreId : UNSET_ID },
+    history: sanitizeHistory(data.history),
+    settings: { ...copyPlain(settings), aisleOrder: !!settings.aisleOrder, lastStoreId: isStr(settings.lastStoreId) ? settings.lastStoreId : UNSET_ID },
   };
   return { ok: true, state };
 }
@@ -227,29 +261,118 @@ export function importJSON(text) {
   } catch {
     return { ok: false, error: 'JSON として読めませんでした' };
   }
-  return validateState(data);
+  const r = validateState(data);
+  if (!r.ok) return r;
+  return { ok: true, state: migratePurchases(r.state) };
 }
 
-/** 壊れた/無い保存データは初期状態にフォールバック */
+/** テキストを状態にする。保存場所は触らない。無いデータは初期状態。 */
 export function parseStored(text) {
-  if (text == null) return initialState();
-  const r = importJSON(text);
-  return r.ok ? r.state : initialState();
+  if (text == null) return { ok: true, state: initialState() };
+  return importJSON(text);
 }
 
-export function load(storage = globalThis.localStorage) {
+function trySet(storage, key, value) {
   try {
-    return parseStored(storage.getItem(STORAGE_KEY));
-  } catch {
-    return initialState();
-  }
-}
-
-export function save(state, storage = globalThis.localStorage) {
-  try {
-    storage.setItem(STORAGE_KEY, JSON.stringify(state));
+    if (typeof storage?.setItem !== 'function') return false;
+    storage.setItem(key, value);
     return true;
   } catch {
     return false;
   }
 }
+
+/** 読めなかった文字列を別キーへ残す。同じ文字列は二重に足さない。元のキーは消さない。 */
+export function quarantineRaw(storage, storageKey, raw) {
+  const qKey = `${storageKey}-unreadable`;
+  let entries = [];
+  try {
+    const cur = storage.getItem(qKey);
+    if (cur) {
+      try {
+        const parsed = JSON.parse(cur);
+        if (Array.isArray(parsed?.entries)) entries = parsed.entries.filter((e) => e && typeof e.raw === 'string');
+        else if (typeof parsed?.raw === 'string') entries = [{ savedAt: parsed.savedAt || null, raw: parsed.raw }];
+        else entries = [{ savedAt: null, raw: cur }];
+      } catch {
+        entries = [{ savedAt: null, raw: cur }];
+      }
+    }
+  } catch {
+    return false;
+  }
+  if (!entries.some((e) => e.raw === raw)) entries.push({ savedAt: new Date().toISOString(), raw });
+  return trySet(storage, qKey, JSON.stringify({ entries }));
+}
+
+function failList(reason, preserved, raw) {
+  return { state: initialState(), problem: { scope: 'list', reason, preserved, raw } };
+}
+
+/** 別キーの履歴を合流し、bought と priceBook を明細へ移す。リストのキーは書き換えない。 */
+function attachHistory(state, storage) {
+  let histText = null;
+  let histReadError = false;
+  try {
+    histText = storage.getItem(HISTORY_KEY);
+  } catch {
+    histReadError = true;
+  }
+  let problem = null;
+  let history = state.history;
+  if (histReadError) {
+    problem = { scope: 'history', reason: 'unavailable', preserved: false, raw: null };
+  } else if (histText != null) {
+    try {
+      const parsed = JSON.parse(histText);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        const preserved = quarantineRaw(storage, HISTORY_KEY, histText);
+        problem = { scope: 'history', reason: 'shape', preserved, raw: histText };
+      } else {
+        history = unionHistory(state.history, parsed);
+      }
+    } catch {
+      const preserved = quarantineRaw(storage, HISTORY_KEY, histText);
+      problem = { scope: 'history', reason: 'json', preserved, raw: histText };
+    }
+  }
+  const migrated = migratePurchases({ ...state, history });
+  if (!problem) trySet(storage, HISTORY_KEY, JSON.stringify(migrated.history));
+  return { state: migrated, problem };
+}
+
+/**
+ * 保存データを読む。
+ * 読めないときは初期状態で黙って上書きせず、元の文字列を別キーへ退避して problem を返す。
+ * データが無いときだけ problem は null。
+ */
+export function load(storage = globalThis.localStorage) {
+  if (!storage || typeof storage.getItem !== 'function') return failList('unavailable', false, null);
+  let text;
+  try {
+    text = storage.getItem(STORAGE_KEY);
+  } catch {
+    return failList('unavailable', false, null);
+  }
+  if (text == null) return attachHistory(initialState(), storage);
+  const parsed = importJSON(text);
+  if (!parsed.ok) {
+    const preserved = quarantineRaw(storage, STORAGE_KEY, text);
+    // リストが読めなくても、別キーの購入履歴は読み、空のリストで上書きしない。
+    const kept = attachHistory(initialState(), storage);
+    return { state: kept.state, problem: { scope: 'list', reason: parsed.error, preserved, raw: text } };
+  }
+  return attachHistory(parsed.state, storage);
+}
+
+export function save(state, storage = globalThis.localStorage) {
+  try {
+    storage.setItem(STORAGE_KEY, JSON.stringify(state));
+    storage.setItem(HISTORY_KEY, JSON.stringify(state.history ?? emptyHistory()));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export { migratePurchases };

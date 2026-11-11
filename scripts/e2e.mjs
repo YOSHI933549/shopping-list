@@ -161,6 +161,7 @@ try {
   const rowOf = (n) => page.locator('.row', { hasText: n });
   assert.equal(await rowOf('お茶').locator('.cur').innerText(), '1,280円');
   assert.equal(await rowOf('お茶').locator('.prev').count(), 0);
+  assert.equal(await rowOf('お茶').locator('.last').count(), 0);
   assert.equal(await rowOf('プレミアム').locator('.cur').innerText(), '98円'); ok('値段入力→リストに「1,280円」「98円」表示（前回はまだ無し）');
   const box = await rowOf('プレミアム').boundingBox();
   const ckBox = await rowOf('プレミアム').locator('.ck').boundingBox();
@@ -174,13 +175,15 @@ try {
   await addWithPrice('マツキヨ', 'お茶', '');
   await page.click('.sh-head >> text=閉じる');
   assert.equal(await rowOf('お茶').locator('.prev').innerText(), '前回1,280円');
-  assert.equal(await rowOf('お茶').locator('.cur').count(), 0); ok('再追加で「前回1,280円」表示');
+  assert.match(await rowOf('お茶').locator('.last').innerText(), /^前回 \d{1,2}\/\d{1,2}（今日）$/);
+  assert.equal(await rowOf('お茶').locator('.cur').count(), 0); ok('再追加で「前回1,280円」と前回の日付');
   await page.click('[data-action="open-add"]');
   await page.click('[data-testid="store-pills"] >> text=Amazon');
   await page.fill('#add-input', 'お茶');
   await page.click('.add-b');
   await page.click('.sh-head >> text=閉じる');
-  assert.equal(await page.locator('.card', { hasText: 'Amazon' }).locator('.prev').count(), 0); ok('別のお店の同名商品には前回値段が出ない');
+  assert.equal(await page.locator('.card', { hasText: 'Amazon' }).locator('.prev').count(), 0);
+  assert.equal(await page.locator('.card', { hasText: 'Amazon' }).locator('.last').count(), 0); ok('別のお店の同名商品には前回値段も前回日も出ない');
   const teaRowM = page.locator('.card', { hasText: 'マツキヨ' }).locator('.row', { hasText: 'お茶' });
   await teaRowM.locator('.nm').click();
   await page.fill('#edit-price', '１５０');
@@ -198,10 +201,20 @@ try {
   assert.equal(await page.locator('.row', { hasText: '旧データの牛乳' }).count(), 1);
   assert.equal(await page.locator('.price').count(), 0); ok('旧データ(priceBookなし)を読み込んでも品が残る');
 
-  // 壊れた保存データ
+  // 壊れた保存データは消さず退避し、知らせを出す
   await page.evaluate(() => localStorage.setItem('kaimono-list-v1', '{oops'));
   await page.reload();
-  assert.ok(await page.getByText('リストは空っぽです').isVisible()); ok('壊れた保存データでも起動する');
+  assert.ok(await page.getByText('リストは空っぽです').isVisible());
+  assert.match(await page.locator('[data-testid="load-note"]').innerText(), /保存データを読めませんでした/);
+  assert.equal(await page.evaluate(() => localStorage.getItem('kaimono-list-v1')), '{oops');
+  const quarantined = await page.evaluate(() => localStorage.getItem('kaimono-list-v1-unreadable'));
+  assert.match(quarantined, /\{oops/); ok('壊れた保存データは控えを残して知らせ、元のキーは上書きしない');
+  await page.click('[data-action="ack-load"]');
+  const replaced = await page.evaluate(() => localStorage.getItem('kaimono-list-v1'));
+  assert.notEqual(replaced, '{oops');
+  assert.equal(JSON.parse(replaced).version, 1);
+  assert.match(await page.evaluate(() => localStorage.getItem('kaimono-list-v1-unreadable')), /\{oops/);
+  assert.equal(await page.locator('[data-testid="load-note"]').count(), 0); ok('確認したあとだけ空のリストを保存し、控えは残る');
 
   assert.deepEqual(errors, [], 'console errors: ' + errors.join('\n'));
   console.log(`E2E OK (${step} steps)`);

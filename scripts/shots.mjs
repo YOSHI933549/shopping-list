@@ -89,10 +89,52 @@ scenarios['13-price-edit-sheet'] = {
   data: priceData, run: (page) => page.locator('.row', { hasText: '牛乳' }).locator('.nm').click(),
 };
 
+// 前回買った日。日付は撮影日からの相対なので、表示は「前回 M/D（N日前）」になる。
+const isoOff = (days) => {
+  const d = new Date();
+  d.setHours(12, 0, 0, 0);
+  d.setDate(d.getDate() + days);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+};
+const boughtLine = (id, name, storeId, days, price) => ({
+  id, itemId: null, name, storeId, date: isoOff(days), boughtAt: `${isoOff(days)}T03:00:00.000Z`, price, memo: '', source: 'migrate',
+});
+scenarios['14-last-date'] = {
+  data: mk([
+    withPrice(it('牛乳', 'aeon'), 198),
+    it('卵', 'aeon', 'Mサイズ'),
+    it('食パン', 'aeon'),
+    withPrice(it('とても長い名前のおいしいプレミアム国産きめ細かな絹ごし豆腐（大容量パック）', 'aeon', '冷蔵コーナーの奥'), 12800),
+    withPrice(it('柔軟剤', 'matsukiyo', 'つめかえ用'), 458),
+  ], {
+    priceBook: { [priceKey('aeon', '牛乳')]: 188, [priceKey('aeon', '食パン')]: 1280 },
+    history: {
+      version: 1,
+      lines: [
+        boughtLine('h-milk', '牛乳', 'aeon', -14, 188),
+        boughtLine('h-bread', '食パン', 'aeon', -3, 1280),
+        boughtLine('h-tofu', 'とても長い名前のおいしいプレミアム国産きめ細かな絹ごし豆腐（大容量パック）', 'aeon', -8, 98),
+        boughtLine('h-soft', '柔軟剤', 'matsukiyo', -1, 430),
+      ],
+    },
+  }),
+};
+scenarios['15-last-date-min'] = {
+  data: mk([it('牛乳', 'aeon')], {
+    history: { version: 1, lines: [boughtLine('h-milk', '牛乳', 'aeon', -14, null)] },
+  }),
+};
+scenarios['16-unreadable'] = { raw: '{oops' };
+
 for (const [name, sc] of Object.entries(scenarios)) {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, locale: 'ja-JP' });
   const page = await ctx.newPage();
-  await page.addInitScript((d) => { if (!localStorage.getItem('__seeded')) { localStorage.setItem('kaimono-list-v1', JSON.stringify(d)); localStorage.setItem('__seeded', '1'); } }, sc.data);
+  if (sc.raw != null) {
+    await page.addInitScript((raw) => { localStorage.setItem('kaimono-list-v1', raw); }, sc.raw);
+  } else {
+    await page.addInitScript((d) => { if (!localStorage.getItem('__seeded')) { localStorage.setItem('kaimono-list-v1', JSON.stringify(d)); localStorage.setItem('__seeded', '1'); } }, sc.data);
+  }
   await page.goto(url);
   await page.evaluate(() => document.fonts.ready);
   if (sc.run) await sc.run(page);

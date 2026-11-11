@@ -1,6 +1,7 @@
 import { icon, itemIcon } from '../lib/icons.js';
 import { categorize, aisleIndex } from '../lib/categorize.js';
 import { formatYen } from '../lib/price.js';
+import { lastBoughtDate, formatLastBought } from '../lib/history.js';
 import { lastPrice } from '../state/store.js';
 import { esc } from './util.js';
 
@@ -37,13 +38,18 @@ function priceLine(state, it) {
   return cur || old ? `<span class="price">${cur}${old}</span>` : '';
 }
 
-function row(state, it) {
+function lastBoughtLine(state, it, now) {
+  const label = formatLastBought(lastBoughtDate(state.history?.lines, it.storeId, it.name), now);
+  return label ? `<span class="last">${esc(label)}</span>` : '';
+}
+
+function row(state, it, now) {
   const memo = it.memo ? `<span class="memo">メモ：${esc(it.memo)}</span>` : '';
-  return `<div class="row" data-row="${esc(it.id)}">${itemIcon(it.name)}<div class="nm" data-action="edit-item" data-id="${esc(it.id)}">${esc(it.name)}${memo}${priceLine(state, it)}</div>` +
+  return `<div class="row" data-row="${esc(it.id)}">${itemIcon(it.name)}<div class="nm" data-action="edit-item" data-id="${esc(it.id)}">${esc(it.name)}${memo}${priceLine(state, it)}${lastBoughtLine(state, it, now)}</div>` +
     `<button class="ck" data-action="check" data-id="${esc(it.id)}" aria-label="${esc(it.name)}を買った"></button></div>`;
 }
 
-export function renderList(state, ui, { speech, boughtCount }) {
+export function renderList(state, ui, { speech, boughtCount, now = new Date() }) {
   const stores = storesWithItems(state);
   const filter = stores.some((s) => s.id === ui.filter) ? ui.filter : 'all';
   const aisle = !!state.settings.aisleOrder;
@@ -52,8 +58,8 @@ export function renderList(state, ui, { speech, boughtCount }) {
   const groups = groupByStore(state, filter);
   const cards = groups.map(({ store, items }) => {
     const body = aisle
-      ? groupByAisle(items).map((g) => `<div class="aisle">${esc(g.aisle)}</div>${g.items.map((it) => row(state, it)).join('')}`).join('')
-      : items.map((it) => row(state, it)).join('');
+      ? groupByAisle(items).map((g) => `<div class="aisle">${esc(g.aisle)}</div>${g.items.map((it) => row(state, it, now)).join('')}`).join('')
+      : items.map((it) => row(state, it, now)).join('');
     return `<section class="card" data-store="${esc(store.id)}"><div class="store">${esc(store.name)}<small>${items.length}品</small></div>${body}</section>`;
   }).join('');
   const empty = `<div class="empty">${icon('list', 56)}<b>リストは空っぽです</b><p>右下の赤いペンのボタンを押して、<br>買いたいものを書き足してみよう。</p></div>`;

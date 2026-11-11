@@ -89,7 +89,7 @@ describe('旧データ（priceBook なしの v1）の互換', () => {
   };
   it('エラーにならず、既存の記録が消えない', () => {
     const mem = new Map([[S.STORAGE_KEY, JSON.stringify(old)]]);
-    const st = S.load({ getItem: (k) => mem.get(k) ?? null });
+    const st = S.load({ getItem: (k) => mem.get(k) ?? null }).state;
     expect(st.items.map((i) => i.name)).toEqual(['牛乳']);
     expect(st.items[0].memo).toBe('x');
     expect(st.bought.map((i) => i.name)).toEqual(['卵']);
@@ -102,11 +102,11 @@ describe('旧データ（priceBook なしの v1）の互換', () => {
   it('移行後に保存→再読み込みしても同じ。以後は値段を記録できる', () => {
     const mem = new Map([[S.STORAGE_KEY, JSON.stringify(old)]]);
     const storage = { getItem: (k) => mem.get(k) ?? null, setItem: (k, v) => mem.set(k, v) };
-    let st = S.load(storage);
+    let st = S.load(storage).state;
     st = S.setItemPrice(st, 'i1', 198);
     st = S.checkItem(st, 'i1');
     S.save(st, storage);
-    const again = S.load(storage);
+    const again = S.load(storage).state;
     expect(again.bought.map((b) => b.name)).toEqual(['卵', '牛乳']);
     expect(S.lastPrice(again, 'aeon', '牛乳')).toBe(198);
     expect(S.STORAGE_KEY).toBe('kaimono-list-v1');
