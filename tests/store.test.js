@@ -116,17 +116,18 @@ describe('export / import / 保存', () => {
     expect(r.state.items[0].storeId).toBe(S.UNSET_ID);
     expect(r.state.stores.some((s) => s.id === S.UNSET_ID)).toBe(true);
   });
-  it('壊れた保存データは初期状態にフォールバック', () => {
-    expect(S.parseStored('{{{')).toEqual(S.initialState());
-    expect(S.parseStored(null)).toEqual(S.initialState());
-    const fake = { getItem() { throw new Error('x'); } };
-    expect(S.load(fake)).toEqual(S.initialState());
+  it('保存データが無いときは初期状態', () => {
+    expect(S.parseStored(null)).toEqual({ ok: true, state: S.initialState() });
+    const storage = { getItem: () => null, setItem() {} };
+    const r = S.load(storage);
+    expect(r.problem).toBeNull();
+    expect(r.state).toEqual(S.initialState());
   });
   it('save/load', () => {
     const mem = new Map();
     const storage = { getItem: (k) => mem.get(k) ?? null, setItem: (k, v) => mem.set(k, v) };
     const st = sample();
     expect(S.save(st, storage)).toBe(true);
-    expect(S.load(storage).items[0].name).toBe('a');
+    expect(S.load(storage).state.items[0].name).toBe('a');
   });
 });
