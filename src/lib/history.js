@@ -1,14 +1,15 @@
 import { normalize } from './categorize.js';
 
-// 買った記録（明細）。30日で消える bought とは別に残す。
-// レシートや品物の台帳はまだ持たない。未知の項目は捨てずに通す。
+// 買った記録（明細）とレシート。30日で消える bought とは別に残す。
+// 品物の台帳（別名の記憶）はまだ持たない。未知の項目は捨てずに通す。
 // date が null の行は日付不明（以前の値段メモの最新1件）。
+// 明細の source: 'check' は丸、'migrate' は移行、'receipt' はレシート。
 export const HISTORY_KEY = 'kaimono-history-v1';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 export function emptyHistory() {
-  return { version: 1, lines: [] };
+  return { version: 1, lines: [], receipts: [] };
 }
 
 export function copyPlain(obj) {
@@ -29,14 +30,48 @@ function validPrice(v) {
   return Number.isInteger(v) && v >= 0 ? v : null;
 }
 
+function sanitizeReceipt(r, index, seen) {
+  if (!r || typeof r !== 'object' || Array.isArray(r)) {
+    return { id: `kept_r_${index}`, storeId: '', date: null, time: null, total: null, tax: '不明', source: 'receipt', text: '', savedAt: null, raw: r };
+  }
+  let id = typeof r.id === 'string' && r.id ? r.id : `kept_r_${index}_${r.storeId || ''}_${r.date || ''}`;
+  if (seen.has(id)) id = `${id}_${index}`;
+  seen.add(id);
+  const total = Number.isInteger(r.total) ? r.total : null;
+  const next = {
+    ...copyPlain(r),
+    id,
+    storeId: typeof r.storeId === 'string' ? r.storeId : '',
+    date: isDate(r.date) ? r.date : null,
+    time: typeof r.time === 'string' ? r.time : null,
+    total: total != null ? total : r.total == null ? null : r.total,
+    tax: typeof r.tax === 'string' && r.tax ? r.tax : '不明',
+    source: typeof r.source === 'string' && r.source ? r.source : 'receipt',
+    text: typeof r.text === 'string' ? r.text : '',
+    savedAt: typeof r.savedAt === 'string' ? r.savedAt : null,
+  };
+  if (!isDate(r.date) && r.date != null) next.keptDate = r.date;
+  if (typeof r.time !== 'string' && r.time != null) next.keptTime = r.time;
+  if (typeof r.savedAt !== 'string' && r.savedAt != null) next.keptSavedAt = r.savedAt;
+  return next;
+}
+
+function sanitizeReceiptList(list) {
+  const seen = new Set();
+  return list.map((r, index) => sanitizeReceipt(r, index, seen));
+}
+
 /** 履歴オブジェクトを整形する。知らない項目は残す。壊れた行も raw として残す。 */
 export function sanitizeHistory(h) {
   if (h == null) return emptyHistory();
-  if (!h || typeof h !== 'object' || Array.isArray(h)) return { version: 1, lines: [], kept: h };
+  if (!h || typeof h !== 'object' || Array.isArray(h)) return { version: 1, lines: [], receipts: [], kept: h };
   const base = copyPlain(h);
+  const keptReceipts = Array.isArray(h.receipts) || h.receipts === undefined ? undefined : h.receipts;
+  const receipts = Array.isArray(h.receipts) ? sanitizeReceiptList(h.receipts) : [];
   if (!Array.isArray(h.lines)) {
-    const out = { ...base, version: 1, lines: [] };
+    const out = { ...base, version: 1, lines: [], receipts };
     if (h.lines !== undefined) out.keptLines = h.lines;
+    if (keptReceipts !== undefined) out.keptReceipts = keptReceipts;
     return out;
   }
   const lines = [];
@@ -65,7 +100,8 @@ export function sanitizeHistory(h) {
     if (typeof line.boughtAt !== 'string' && line.boughtAt != null) next.keptBoughtAt = line.boughtAt;
     lines.push(next);
   });
-  const out = { ...base, version: 1, lines };
+  const out = { ...base, version: 1, lines, receipts };
+  if (keptReceipts !== undefined) out.keptReceipts = keptReceipts;
   if (out.keptLines === undefined) delete out.keptLines;
   return out;
 }
@@ -117,6 +153,10 @@ export function migratePurchases(state) {
   for (const b of state.bought || []) {
     if (!b || typeof b.id !== 'string' || !b.id || itemIds.has(b.id)) continue;
     if (typeof b.name !== 'string' || typeof b.storeId !== 'string') continue;
+    // 同じ日・同じお店・同じ品の明細がすでにある（レシートで丸を置き換えたときなど）は足さない。
+    const boughtDate = isDate(b.boughtDate) ? b.boughtDate : null;
+    const covered = boughtDate != null && lines.some((l) => l.storeId === b.storeId && l.date === boughtDate && normalize(l.name) === normalize(b.name));
+    if (covered) continue;
     lines.push(lineFromBought(b));
     itemIds.add(b.id);
   }
@@ -164,7 +204,12 @@ export function unionHistory(a, b) {
   for (const line of right.lines) {
     map.set(line.id, map.has(line.id) ? mergeLine(map.get(line.id), line) : line);
   }
-  const out = { ...left, ...right, version: 1, lines: [...map.values()] };
+  const receiptMap = new Map();
+  for (const rec of left.receipts) receiptMap.set(rec.id, rec);
+  for (const rec of right.receipts) {
+    receiptMap.set(rec.id, receiptMap.has(rec.id) ? mergeLine(receiptMap.get(rec.id), rec) : rec);
+  }
+  const out = { ...left, ...right, version: 1, lines: [...map.values()], receipts: [...receiptMap.values()] };
   if (out.keptLines === undefined) delete out.keptLines;
   return out;
 }

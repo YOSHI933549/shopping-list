@@ -127,8 +127,39 @@ scenarios['15-last-date-min'] = {
 };
 scenarios['16-unreadable'] = { raw: '{oops' };
 
+async function pasteReceipt(page, text) {
+  await page.click('[data-action="open-receipt"]');
+  await page.fill('#receipt-text', text);
+  await page.click('[data-action="receipt-read"]');
+  await page.waitForSelector('[data-testid="receipt-totals"]');
+}
+
+const manyNames = ['牛乳', '卵', '食パン', 'キャベツ', '人参', '玉ねぎ', '豆腐', '納豆', '醤油', 'ツナ缶', '麦茶', 'りんご', 'バナナ', '豚肉', '鮭', 'ヨーグルト', 'バター', 'ジャム', 'お茶', 'とても長い名前の国産きめ細かな絹ごし豆腐'];
+const manySum = manyNames.reduce((sum, _, i) => sum + 100 + i * 10, 0);
+scenarios['17-receipt-many'] = {
+  data: mk([it('牛乳', 'aeon')]),
+  viewport: { width: 390, height: 5200 },
+  scale: 1,
+  run: async (page) => {
+    const body = manyNames.map((name, i) => `${name} ${100 + i * 10}`).join('\n');
+    await pasteReceipt(page, `${body}\n合計 ${manySum}`);
+  },
+};
+scenarios['18-receipt-one'] = {
+  data: mk([it('牛乳', 'aeon')]),
+  run: (page) => pasteReceipt(page, '牛乳 198\n合計 198'),
+};
+scenarios['19-receipt-mismatch'] = {
+  data: mk([]),
+  run: (page) => pasteReceipt(page, '牛乳 200\n卵 300\n合計 460'),
+};
+scenarios['20-receipt-unknown'] = {
+  data: mk([]),
+  run: (page) => pasteReceipt(page, 'マツキヨ\n牛乳 198\n◆今週のおすすめ◆\n合計 198'),
+};
+
 for (const [name, sc] of Object.entries(scenarios)) {
-  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, locale: 'ja-JP' });
+  const ctx = await browser.newContext({ viewport: sc.viewport || { width: 390, height: 844 }, deviceScaleFactor: sc.scale || 3, locale: 'ja-JP' });
   const page = await ctx.newPage();
   if (sc.raw != null) {
     await page.addInitScript((raw) => { localStorage.setItem('kaimono-list-v1', raw); }, sc.raw);

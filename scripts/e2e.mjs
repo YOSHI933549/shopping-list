@@ -216,6 +216,68 @@ try {
   assert.match(await page.evaluate(() => localStorage.getItem('kaimono-list-v1-unreadable')), /\{oops/);
   assert.equal(await page.locator('[data-testid="load-note"]').count(), 0); ok('確認したあとだけ空のリストを保存し、控えは残る');
 
+  // レシート: 貼る → 確認 → 1行直す → 保存 → 履歴 → リストから消える → 再読み込み
+  await page.click('[data-action="open-add"]');
+  await page.click('[data-testid="store-pills"] >> text=イオン');
+  await page.fill('#add-input', '牛乳');
+  await page.click('.add-b');
+  await page.fill('#add-input', '食パン');
+  await page.click('.add-b');
+  await page.click('.sh-head >> text=閉じる');
+  assert.equal(await page.locator('.row').count(), 2); ok('レシート用に牛乳と食パンを入れる');
+
+  await page.click('[data-action="open-receipt"]');
+  await page.fill('#receipt-text', ['イオン', '牛乳 198', 'タマゴ 258', '会員番号 1234-5678-9012', '合計 456'].join('\n'));
+  await page.click('[data-action="receipt-read"]');
+  await page.waitForSelector('[data-testid="receipt-rows"]');
+  assert.equal(await page.locator('.rraw', { hasText: '牛乳 198' }).count(), 1);
+  assert.equal(await page.locator('.rraw', { hasText: 'タマゴ 258' }).count(), 1); ok('確認画面に明細の行が出る');
+
+  await page.evaluate(() => document.documentElement.style.setProperty('--kb', '280px'));
+  const sheetBox = await page.locator('.sheet').boundingBox();
+  const viewport = page.viewportSize();
+  assert.ok(Math.abs(sheetBox.y + sheetBox.height - (viewport.height - 280)) < 3, `sheet bottom ${sheetBox.y + sheetBox.height}`);
+  const saveBox = await page.locator('[data-action="receipt-save"]').boundingBox();
+  assert.ok(saveBox.y >= sheetBox.y && saveBox.y + saveBox.height <= sheetBox.y + sheetBox.height + 1); ok('キーボードの高さだけシートが上がり、保存ボタンがシート内に残る');
+  await page.evaluate(() => document.documentElement.style.setProperty('--kb', '0px'));
+
+  await page.locator('.rname').nth(1).fill('卵');
+  await page.click('[data-action="receipt-save"]');
+  assert.equal(await page.locator('.sheet').count(), 0);
+  assert.equal(await page.locator('.row', { hasText: '牛乳' }).count(), 0);
+  assert.equal(await page.locator('.row', { hasText: '食パン' }).count(), 1);
+  assert.equal(await page.locator('[data-testid="export-nudge"]').count(), 0); ok('1行直して保存すると牛乳がリストから消え、書き出しの促しは出ない');
+
+  const readHist = () => page.evaluate(() => JSON.parse(localStorage.getItem('kaimono-history-v1')));
+  const hist = await readHist();
+  assert.equal(hist.receipts.length, 1);
+  assert.equal(hist.receipts[0].source, 'receipt');
+  assert.equal(hist.receipts[0].storeId, 'aeon');
+  assert.ok(hist.lines.some((l) => l.source === 'receipt' && l.name === '牛乳'));
+  assert.ok(hist.lines.some((l) => l.source === 'receipt' && l.name === '卵'));
+  assert.equal(JSON.stringify(hist).includes('1234-5678-9012'), false); ok('履歴にレシートと直した品名が入り、会員番号は残らない');
+
+  await page.reload();
+  await page.evaluate(() => document.fonts.ready);
+  assert.equal(await page.locator('.row', { hasText: '牛乳' }).count(), 0);
+  assert.equal(await page.locator('.row', { hasText: '食パン' }).count(), 1);
+  const hist2 = await readHist();
+  assert.equal(hist2.receipts.length, 1);
+  assert.ok(hist2.lines.some((l) => l.name === '卵' && l.source === 'receipt')); ok('再読み込み後も履歴とリストの状態が残る');
+
+  await page.click('[data-action="open-receipt"]');
+  await page.fill('#receipt-text', 'パン 200\n卵 300\n合計 460');
+  await page.click('[data-action="receipt-read"]');
+  assert.equal(await page.locator('[data-testid="receipt-note"]').innerText(), '合計と40円ずれています');
+  const noteColor = await page.locator('[data-testid="receipt-note"]').evaluate((el) => getComputedStyle(el).color);
+  const sumColor = await page.locator('[data-testid="receipt-sum"]').evaluate((el) => getComputedStyle(el).color);
+  assert.equal(noteColor, sumColor);
+  assert.equal(await page.locator('[data-action="receipt-save"]').isEnabled(), true); ok('合計が40円ずれていても色を変えずに表示し、保存できる');
+  await page.click('[data-action="receipt-save"]');
+  const hist3 = await readHist();
+  assert.equal(hist3.receipts.length, 2);
+  assert.equal(await page.locator('.row', { hasText: '食パン' }).count(), 1); ok('ずれていても保存でき、リストの食パンは残る');
+
   assert.deepEqual(errors, [], 'console errors: ' + errors.join('\n'));
   console.log(`E2E OK (${step} steps)`);
 } catch (e) {
