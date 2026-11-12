@@ -13,12 +13,21 @@ import { icon } from './lib/icons.js';
 import { parsePrice } from './lib/price.js';
 import { parseReceipt } from './lib/receipt.js';
 import { buildReceiptDraft, editLine, exportNudge, keyboardInset, namesForStore } from './lib/receiptDraft.js';
+import {
+  backupFilename, canShareBackupFile, describeHistoryMerge, historyBackupJSON, historyBackupNudge,
+  historyImportSummary, parseHistoryBackup, stateWithHistory,
+} from './lib/historyBackup.js';
 import { parseSpoken, speechSupported, listen } from './lib/speech.js';
 
 const opened = S.load();
 let state = opened.problem?.scope === 'list' ? opened.state : S.pruneBought(opened.state);
 let loadProblem = opened.problem;
-const ui = { tab: 'list', filter: 'all', sheet: null, sheetStore: null, sheetAdded: [], memoOpen: false, exportText: '', receipt: null, nudge: '', goodsPick: null };
+const openingNudge = loadProblem ? null : historyBackupNudge(state);
+const ui = {
+  tab: 'list', filter: 'all', sheet: null, sheetStore: null, sheetAdded: [], memoOpen: false, exportText: '',
+  receipt: null, nudge: openingNudge?.message || '', nudgeAction: openingNudge ? 'open-history-export' : 'open-export',
+  goodsPick: null, historyPreview: null,
+};
 const pending = new Set();
 const speech = speechSupported();
 let stopListen = null;
@@ -62,7 +71,7 @@ function loadNoticeHtml(problem) {
 function render() {
   const sc = view.querySelector('[data-scroll]')?.scrollTop ?? 0;
   const boughtCount = S.boughtToday(state).length;
-  if (ui.tab === 'list') view.innerHTML = renderList(state, ui, { speech, boughtCount, nudge: ui.nudge }).html;
+  if (ui.tab === 'list') view.innerHTML = renderList(state, ui, { speech, boughtCount, nudge: ui.nudge, nudgeAction: ui.nudgeAction }).html;
   else if (ui.tab === 'regular') view.innerHTML = renderRegular(state, ui);
   else view.innerHTML = renderMypage(state, ui, version);
   const mainEl = view.querySelector('main');
@@ -236,6 +245,7 @@ function saveReceiptFromSheet() {
   }
   const nudge = exportNudge(result.state);
   ui.nudge = nudge ? nudge.message : '';
+  ui.nudgeAction = 'open-export';
   closeSheet();
   commit(result.state);
 }
@@ -314,6 +324,63 @@ function download(name, text) {
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function showHistoryPreview(text, { restore = false } = {}) {
+  if (listBlocked()) {
+    toast('読めなかったデータが残っています。先に知らせを確認してください');
+    return;
+  }
+  const raw = String(text ?? '');
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    toast('テキストを貼るか、ファイルを選んでください');
+    return;
+  }
+  const parsed = parseHistoryBackup(trimmed);
+  if (!parsed.ok) {
+    ui.historyPreview = null;
+    toast(`取り込めません：${parsed.error}`);
+    render();
+    if (restore) {
+      const box = document.getElementById('history-import-text');
+      if (box) box.value = raw;
+    }
+    return;
+  }
+  ui.historyPreview = { history: parsed.history, summary: historyImportSummary(describeHistoryMerge(state.history, parsed.history)) };
+  ui.tab = 'mypage';
+  render();
+  if (restore) {
+    const box = document.getElementById('history-import-text');
+    if (box) box.value = raw;
+  }
+  view.querySelector('[data-testid="history-import-preview"]')?.scrollIntoView({ block: 'nearest' });
+}
+
+async function exportHistoryFile() {
+  if (listBlocked()) {
+    toast('読めなかったデータが残っています。先に知らせを確認してください');
+    return;
+  }
+  const text = historyBackupJSON(state.history, new Date().toISOString());
+  const name = backupFilename(S.localDate());
+  const file = new File([text], name, { type: 'application/json' });
+  if (canShareBackupFile(navigator, file)) {
+    try {
+      await navigator.share({ files: [file], title: '購入履歴' });
+      rememberExport();
+      toast('書き出しました');
+      render();
+      return;
+    } catch (err) {
+      if (err?.name === 'AbortError') return;
+    }
+  }
+  download(name, text);
+  rememberExport();
+  toast('ファイルを保存しました');
+  render();
 }
 
 function doImport(text) {
@@ -438,6 +505,12 @@ const actions = {
     render();
     view.querySelector('#export-sec')?.scrollIntoView({ block: 'start' });
   },
+  'open-history-export': () => {
+    ui.tab = 'mypage';
+    ui.nudge = '';
+    render();
+    view.querySelector('#history-export-sec')?.scrollIntoView({ block: 'start' });
+  },
   'open-bought': openBoughtSheet,
   'close-sheet': closeSheet,
   'edit-item': openEditSheet,
@@ -482,6 +555,23 @@ const actions = {
     const t = document.getElementById('import-text').value.trim();
     if (!t) { toast('テキストを貼るか、ファイルを選んでください'); return; }
     doImport(t);
+  },
+  'history-export': () => { exportHistoryFile(); },
+  'history-import-preview': () => showHistoryPreview(document.getElementById('history-import-text')?.value, { restore: true }),
+  'history-import-apply': () => {
+    if (!ui.historyPreview) return;
+    if (listBlocked()) {
+      toast('読めなかったデータが残っています。先に知らせを確認してください');
+      return;
+    }
+    const next = stateWithHistory(state, ui.historyPreview.history);
+    ui.historyPreview = null;
+    commit(next);
+    toast('購入履歴を足しました');
+  },
+  'history-import-cancel': () => {
+    ui.historyPreview = null;
+    render();
   },
 };
 
@@ -567,6 +657,11 @@ document.addEventListener('change', async (e) => {
     const text = await e.target.files[0].text();
     e.target.value = '';
     doImport(text);
+  }
+  if (e.target.id === 'history-import-file' && e.target.files[0]) {
+    const text = await e.target.files[0].text();
+    e.target.value = '';
+    showHistoryPreview(text);
   }
 });
 
