@@ -1,5 +1,5 @@
 import { UNSET_ID } from '../state/store.js';
-import { productChoices, readYen, totalsLabel } from '../lib/receiptDraft.js';
+import { readYen, totalsLabel } from '../lib/receiptDraft.js';
 import { esc } from './util.js';
 
 function storeButtons(state, draft) {
@@ -15,14 +15,24 @@ function moneyInput(cls, label, value, suffix) {
   return `<label>${label}<input class="${cls}" inputmode="decimal" enterkeyhint="done" autocomplete="off" aria-label="${label}" value="${shown}">${tail}</label>`;
 }
 
-function choiceSelect(state, storeId, name) {
-  const choices = productChoices(state, storeId);
-  if (!choices.length) return '';
-  const cur = String(name ?? '');
-  const opts = ['<option value="">（このまま）</option>'].concat(
-    choices.map((c) => `<option value="${esc(c)}"${c === cur ? ' selected' : ''}>${esc(c)}</option>`),
-  );
-  return `<select class="rpick" aria-label="既存の品から選ぶ">${opts.join('')}</select>`;
+function sizeNote(line) {
+  const bits = [];
+  if (Number.isInteger(line.volumeMl) && line.volumeMl > 0) bits.push(`${line.volumeMl}ml`);
+  if (Number.isInteger(line.weightG) && line.weightG > 0) bits.push(`${line.weightG}g`);
+  if (Number.isInteger(line.packCount) && line.packCount > 0) bits.push(`${line.packCount}${line.packUnit || 'コ'}`);
+  if (!bits.length) return '';
+  return `<div class="rsize">${bits.map((b) => esc(b)).join('・')}</div>`;
+}
+
+function candidateButtons(line) {
+  const list = line.candidates || [];
+  if (!list.length) return '';
+  const buttons = list.map((c) => {
+    const on = line.chosen && line.name === c.name ? ' on' : '';
+    const goods = c.goodsId ? ` data-goods="${esc(c.goodsId)}"` : '';
+    return `<button type="button" class="cand${on}" data-action="pick-candidate" data-id="${esc(line.key)}" data-name="${esc(c.name)}"${goods}>${esc(c.name)}</button>`;
+  }).join('');
+  return `<div class="rcands" data-testid="receipt-candidates">${buttons}</div>`;
 }
 
 function discountRow(discount) {
@@ -31,14 +41,17 @@ function discountRow(discount) {
   return `<div class="rdiscount">割引 −<input class="rdisc" inputmode="numeric" enterkeyhint="done" autocomplete="off" aria-label="割引" value="${esc(n)}">円</div>`;
 }
 
-function itemRow(state, draft, line) {
+function itemRow(line) {
   const raw = line.raw ? `<div class="rraw">${esc(line.raw)}</div>` : '';
+  const shown = line.chosen ? (line.name ?? '') : '';
+  const placeholder = line.chosen ? '' : '（えらぶ）';
   return `<div class="rrow" data-line="${esc(line.key)}">${raw}<div class="redit"><span class="rarrow" aria-hidden="true">→</span>` +
-    `<textarea class="rname" rows="1" enterkeyhint="done" autocomplete="off" aria-label="品名">${esc(line.name ?? '')}</textarea>` +
+    `<textarea class="rname" rows="1" enterkeyhint="done" autocomplete="off" aria-label="品名" placeholder="${placeholder}">${esc(shown)}</textarea>` +
     `<button type="button" class="rdrop" data-action="receipt-drop" data-id="${esc(line.key)}">消す</button></div>` +
+    `${sizeNote(line)}` +
     `<div class="rnums">${moneyInput('rqty', '数量', line.quantity)}<span class="rtimes">×</span>${moneyInput('runit', '単価', line.unitPrice, '円')}` +
     `${moneyInput('ramount', '金額', line.amount, '円')}</div>` +
-    `${choiceSelect(state, draft.storeId, line.name)}${discountRow(line.discount)}</div>`;
+    `${candidateButtons(line)}${discountRow(line.discount)}</div>`;
 }
 
 function unknownRow(line) {
@@ -66,7 +79,7 @@ export function confirmSheetHtml(state, draft) {
   const hinted = (draft.suggestedIds || []).includes(draft.storeId);
   const hint = hinted ? '<p class="suggest-note">レシートの文字にあったお店を選んでいます</p>' : '';
   const time = draft.time ? `<span class="rtime">${esc(draft.time)}</span>` : '';
-  const rows = (draft.lines || []).map((line) => (line.kind === 'unknown' ? unknownRow(line) : itemRow(state, draft, line))).join('');
+  const rows = (draft.lines || []).map((line) => (line.kind === 'unknown' ? unknownRow(line) : itemRow(line))).join('');
   const empty = rows ? '' : '<p class="hint">品の行が見つかりませんでした。文字を貼り直すか、このまま閉じてください。</p>';
   return `<div class="dim" data-action="close-sheet"></div>
 <div class="sheet receipt" role="dialog" aria-label="レシートの確認">

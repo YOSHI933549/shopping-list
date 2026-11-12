@@ -1,9 +1,11 @@
 import { normalize } from './categorize.js';
+import { goodsForAlias, sharesText } from './goods.js';
 import { daysBefore, isDate } from './history.js';
 import { formatYen, MAX_PRICE } from './price.js';
 
-// 確認画面の下書き。品名は normalize 後の完全一致と、手で選んだ名前だけを使う。
-// あいまいな一致ではまとめない。別名を覚える処理はここではしない。
+// 確認画面の下書き。
+// 自動で入れるのは、その店の別名への完全一致と、品名の完全一致だけ。
+// 今日のリスト・丸を押した品・文字が部分的に重なる品は候補にする。選ばなければ新しい品として残す。
 
 export const EXPORT_NUDGE_DAYS = 30;
 export const EXPORT_NUDGE_COUNT = 8;
@@ -76,6 +78,88 @@ export function existingName(state, storeId, parsedName) {
   return productChoices(state, storeId).find((name) => normalize(name) === want) || null;
 }
 
+function goodsIdForName(goods, name) {
+  const key = normalize(name);
+  const hit = (goods || []).find((g) => g && !g.mergedInto && normalize(g.name) === key);
+  return hit ? hit.id : null;
+}
+
+/** リストや履歴に無い品名でも、台帳の表示名と完全一致ならそれを使う。 */
+export function exactProductName(state, storeId, parsedName) {
+  const fromChoices = existingName(state, storeId, parsedName);
+  if (fromChoices) return fromChoices;
+  const hit = (state?.history?.goods || []).find((g) => g && !g.mergedInto && normalize(g.name) === normalize(parsedName));
+  return hit ? hit.name : null;
+}
+
+function todayNames(state, storeId, today) {
+  const names = [];
+  for (const item of state?.items || []) {
+    if (item?.storeId === storeId && typeof item.name === 'string') names.push(item.name);
+  }
+  for (const b of state?.bought || []) {
+    if (b?.storeId === storeId && b.boughtDate === today && typeof b.name === 'string') names.push(b.name);
+  }
+  return names;
+}
+
+function overlapNames(state, parsedName) {
+  const want = normalize(parsedName);
+  if (want.length < 2) return [];
+  const names = [];
+  const push = (name) => { if (typeof name === 'string' && name.trim()) names.push(name); };
+  for (const g of state?.history?.goods || []) if (g && !g.mergedInto) push(g.name);
+  for (const list of [state?.items, state?.bought, state?.regulars, state?.history?.lines]) {
+    for (const row of list || []) push(row?.name);
+  }
+  const out = [];
+  const seen = new Set();
+  for (const name of names) {
+    const key = normalize(name);
+    if (!key || seen.has(key) || key === want) continue;
+    if (!sharesText(want, name)) continue;
+    seen.add(key);
+    out.push(name);
+  }
+  return out;
+}
+
+/**
+ * 候補は ①別名の完全一致 ②今日のリストと今日丸を押した品 ③文字が2文字以上重なる品。
+ * 自動で入れるのは ①が一つだけのときと、品名が既存と完全一致のとき。それ以外は（えらぶ）。
+ * 候補が一つも無く、既存とも一致しないときは、きれいにした品名を新しい品として出す。
+ */
+export function matchLine(state, storeId, parsedName, notation, today) {
+  const goods = state?.history?.goods || [];
+  const aliasHits = goodsForAlias(goods, storeId, notation);
+  const exact = exactProductName(state, storeId, parsedName);
+  const candidates = [];
+  const seen = new Set();
+  const push = (name, goodsId, reason) => {
+    const n = String(name ?? '').trim();
+    const key = normalize(n);
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    candidates.push({ name: n, goodsId: goodsId || null, reason });
+  };
+  for (const g of aliasHits) push(g.name, g.id, 'alias');
+  if (exact) push(exact, goodsIdForName(goods, exact), 'exact');
+  for (const name of todayNames(state, storeId, today)) push(name, goodsIdForName(goods, name), 'today');
+  for (const name of overlapNames(state, parsedName)) push(name, goodsIdForName(goods, name), 'overlap');
+
+  if (aliasHits.length === 1) {
+    return { name: aliasHits[0].name, goodsId: aliasHits[0].id, chosen: true, reason: 'alias', candidates };
+  }
+  if (aliasHits.length === 0 && exact) {
+    return { name: exact, goodsId: goodsIdForName(goods, exact), chosen: true, reason: 'exact', candidates };
+  }
+  const parsed = String(parsedName ?? '').trim();
+  if (!candidates.length && parsed) {
+    return { name: parsed, goodsId: goodsIdForName(goods, parsed), chosen: true, reason: 'new', candidates };
+  }
+  return { name: '', goodsId: null, chosen: false, reason: '', candidates };
+}
+
 function lineKey(kind, index) {
   return `${kind}-${index}`;
 }
@@ -90,7 +174,8 @@ export function buildReceiptDraft(parsed, state, today) {
   const lines = [];
   (parsed?.items || []).forEach((item, index) => {
     const parsedName = typeof item.name === 'string' ? item.name : '';
-    const exact = existingName(state, storeId, parsedName);
+    const notation = typeof item.notation === 'string' ? item.notation : '';
+    const matched = matchLine(state, storeId, parsedName, notation, today);
     const quantity = item.quantity || 1;
     const unitPrice = Number.isInteger(item.unitPrice) ? item.unitPrice : null;
     const discount = Number.isInteger(item.discount) ? item.discount : 0;
@@ -100,8 +185,14 @@ export function buildReceiptDraft(parsed, state, today) {
       key: lineKey('item', index),
       kind: 'item',
       raw: typeof item.raw === 'string' ? item.raw : '',
+      label: typeof item.label === 'string' ? item.label : '',
       parsedName,
-      name: exact || parsedName,
+      notation,
+      name: matched.name,
+      goodsId: matched.goodsId,
+      chosen: matched.chosen,
+      reason: matched.reason,
+      candidates: matched.candidates,
       nameTouched: false,
       quantity,
       unitPrice,
@@ -109,6 +200,7 @@ export function buildReceiptDraft(parsed, state, today) {
       discount,
       amountTouched: formula != null && formula !== amount,
       volumeMl: item.volumeMl ?? null,
+      weightG: item.weightG ?? null,
       packCount: item.packCount ?? null,
       packUnit: item.packUnit ?? null,
     });
@@ -124,19 +216,29 @@ export function buildReceiptDraft(parsed, state, today) {
     total: Number.isInteger(parsed?.total) ? parsed.total : null,
     tax: parsed?.tax === '税込' || parsed?.tax === '税抜' ? parsed.tax : '不明',
     text,
+    today,
     lines,
   };
 }
 
-/** 店を変えたとき、まだ手で直していない行だけ完全一致を付け直す。 */
+/** 店を変えたとき、まだ手で直していない行だけ別名と完全一致を付け直す。 */
 export function namesForStore(draft, state, storeId) {
+  const today = draft?.today;
   return {
     ...draft,
     storeId,
     lines: (draft.lines || []).map((line) => {
-      if (!line || line.kind !== 'item' || line.nameTouched) return line;
-      const exact = existingName(state, storeId, line.parsedName);
-      return { ...line, name: exact || line.parsedName };
+      if (!line || line.kind !== 'item') return line;
+      const matched = matchLine(state, storeId, line.parsedName, line.notation, today);
+      if (line.nameTouched) return { ...line, candidates: matched.candidates };
+      return {
+        ...line,
+        name: matched.name,
+        goodsId: matched.goodsId,
+        chosen: matched.chosen,
+        reason: matched.reason,
+        candidates: matched.candidates,
+      };
     }),
   };
 }
@@ -144,8 +246,19 @@ export function namesForStore(draft, state, storeId) {
 /** 行の入力。数量・単価・割引を変えて、金額をまだ直していなければ金額を計算し直す。 */
 export function editLine(line, field, value) {
   if (!line || line.kind !== 'item') return line;
+  if (field === 'name') {
+    const trimmed = String(value ?? '').trim();
+    const hit = (line.candidates || []).find((c) => c.name === trimmed);
+    return {
+      ...line,
+      name: trimmed,
+      nameTouched: true,
+      chosen: trimmed !== '',
+      goodsId: hit?.goodsId || null,
+      reason: hit?.reason || (trimmed ? 'typed' : ''),
+    };
+  }
   const next = { ...line, [field]: value };
-  if (field === 'name') next.nameTouched = true;
   if (field === 'amount') {
     next.amountTouched = true;
     return next;

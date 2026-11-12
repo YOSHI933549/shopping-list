@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { parseReceipt } from '../src/lib/receipt.js';
 import {
-  EXPORT_NUDGE_COUNT, buildReceiptDraft, describeTotals, editLine, existingName, exportNudge,
-  keyboardInset, productChoices, suggestStores, totalsLabel,
+  EXPORT_NUDGE_COUNT,   buildReceiptDraft, describeTotals, editLine, existingName, exportNudge,
+  keyboardInset, namesForStore, productChoices, suggestStores, totalsLabel,
 } from '../src/lib/receiptDraft.js';
 import { unionHistory } from '../src/lib/history.js';
 import { confirmSheetHtml } from '../src/ui/receipt.js';
@@ -139,12 +139,18 @@ describe('レシートの保存', () => {
 
   it('選ばなければ、元の表記から作った品名のまま新しい品として残す', () => {
     const state = withMilk('牛乳');
-    const draft = buildReceiptDraft(parseReceipt('ｷﾞｭｳﾆｭｳ1L 198\n合計 198'), state, today);
-    draft.storeId = 'aeon';
-    expect(draft.lines[0].name).toBe('ぎゅうにゅう');
+    const draft = namesForStore(buildReceiptDraft(parseReceipt('ｷﾞｭｳﾆｭｳ1L 198\n合計 198'), state, today), state, 'aeon');
+    expect(draft.lines[0].chosen).toBe(false);
+    expect(draft.lines[0].name).toBe('');
+    expect(draft.lines[0].volumeMl).toBe(1000);
+    expect(draft.lines[0].candidates.map((c) => c.name)).toContain('牛乳');
     const result = S.saveReceipt(state, draft, now);
     expect(result.state.items.map((i) => i.name)).toEqual(['牛乳']);
     expect(result.state.history.lines.map((l) => l.name)).toEqual(['ぎゅうにゅう']);
+    expect(result.state.history.lines[0].raw).toContain('ｷﾞｭｳﾆｭｳ1L');
+    expect(result.state.history.lines[0].volumeMl).toBe(1000);
+    expect(result.state.history.lines[0].goodsId).toBeTruthy();
+    expect(result.state.history.goods.map((g) => g.name)).toEqual(['ぎゅうにゅう']);
   });
 
   it('手で既存の品名を選べば、そのリストの品を買った扱いにする', () => {

@@ -158,6 +158,82 @@ scenarios['20-receipt-unknown'] = {
   run: (page) => pasteReceipt(page, 'マツキヨ\n牛乳 198\n◆今週のおすすめ◆\n合計 198'),
 };
 
+const confirmLines = [
+  'ｷﾞｭｳﾆｭｳ1L 198',
+  'ﾀﾏｺﾞ10ｺ 258',
+  'ｼﾞｭｳﾅﾝｻﾞｲ 398',
+  'ﾖｰｸﾞﾙﾄ350g 128',
+  'ｼﾞｭｰｽ500ml 158',
+  'ｼｮｸﾊﾟﾝ6枚 138',
+  'ｷｬﾍﾞﾂ 98',
+  'ﾆﾝｼﾞﾝ 128',
+  'ﾄｳﾌ 88',
+  'ﾅｯﾄｳ 78',
+  'ﾘﾝｺﾞ 198',
+  'とても長い名前の国産きめ細かな絹ごし豆腐の半額シール付き 248',
+];
+const confirmSum = [198, 258, 398, 128, 158, 138, 98, 128, 88, 78, 198, 248].reduce((a, b) => a + b, 0);
+scenarios['21-confirm-candidates-min'] = {
+  data: mk([it('牛乳', 'aeon'), it('卵', 'aeon')]),
+  run: (page) => pasteReceipt(page, `イオン\nｷﾞｭｳﾆｭｳ1L 198\n合計 198`),
+};
+scenarios['22-confirm-candidates-max'] = {
+  data: mk(twenty),
+  viewport: { width: 390, height: 6400 },
+  scale: 1,
+  run: (page) => pasteReceipt(page, `イオン\n${confirmLines.join('\n')}\n合計 ${confirmSum}`),
+};
+
+const goodsMin = {
+  version: 2,
+  receipts: [],
+  lines: [{
+    id: 'l1', goodsId: 'g1', name: 'ぎゅうにゅう', raw: 'ｷﾞｭｳﾆｭｳ1L 198', notation: 'ぎゅうにゅう1l',
+    storeId: 'aeon', date: '2026-11-11', price: 198, source: 'receipt', itemId: null, memo: '',
+  }],
+  goods: [
+    { id: 'g1', name: 'ぎゅうにゅう', aliases: [{ storeId: 'aeon', notation: 'ぎゅうにゅう1l' }], mergedInto: 'g2' },
+    { id: 'g2', name: '牛乳', aliases: [{ storeId: 'matsukiyo', notation: 'ぎゅうにゅう' }], mergedInto: null },
+  ],
+};
+const goodsMax = (() => {
+  const goods = [];
+  const lines = [];
+  for (let i = 0; i < 12; i += 1) {
+    const id = `g${i}`;
+    const name = i === 0 ? '牛乳' : i === 4 ? 'とても長い名前の国産きめ細かな絹ごし豆腐（大容量パック）' : `作り例の品${i}`;
+    goods.push({
+      id,
+      name,
+      aliases: [
+        { storeId: 'aeon', notation: `ひんぶつ${i}1l` },
+        { storeId: 'matsukiyo', notation: `ながいひょうきのれしーとしょうひんばんごうつき${i}` },
+      ],
+      mergedInto: i === 1 ? 'g4' : null,
+    });
+    lines.push({
+      id: `ln${i}`, goodsId: id, name, raw: `4901234567890 作り例${i} ｷﾞｭｳﾆｭｳ1L 198`, notation: `ひんぶつ${i}1l`,
+      storeId: 'aeon', date: '2026-11-01', price: 100 + i, source: 'receipt', itemId: null, memo: '',
+    });
+  }
+  return { version: 2, lines, receipts: [], goods };
+})();
+async function openGoods(page) {
+  await page.click('.tab >> text=マイページ');
+  await page.click('[data-action="open-goods"]');
+  await page.waitForSelector('[data-testid="goods-sheet"]');
+}
+scenarios['23-goods-min'] = {
+  data: mk([], { history: goodsMin }),
+  run: openGoods,
+};
+scenarios['24-goods-max'] = {
+  data: mk([], { history: goodsMax }),
+  viewport: { width: 390, height: 6400 },
+  scale: 1,
+  run: openGoods,
+};
+
 for (const [name, sc] of Object.entries(scenarios)) {
   const ctx = await browser.newContext({ viewport: sc.viewport || { width: 390, height: 844 }, deviceScaleFactor: sc.scale || 3, locale: 'ja-JP' });
   const page = await ctx.newPage();

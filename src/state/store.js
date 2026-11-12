@@ -1,9 +1,10 @@
 import { parsePrice, priceKey } from '../lib/price.js';
 import { normalize } from '../lib/categorize.js';
+import { assignGoods, mergeGoods, splitGoods } from '../lib/goods.js';
 import { stripSensitiveLines } from '../lib/receipt.js';
 import { readYen } from '../lib/receiptDraft.js';
 import {
-  HISTORY_KEY, emptyHistory, copyPlain, sanitizeHistory, migratePurchases, unionHistory,
+  HISTORY_KEY, HISTORY_VERSION, emptyHistory, copyPlain, sanitizeHistory, migratePurchases, unionHistory,
   appendPurchase, dropPurchase, priceFromLines, isDate,
 } from '../lib/history.js';
 
@@ -255,6 +256,20 @@ export function saveReceipt(state, draft, now = new Date()) {
   }
   if (!prepared.length) return { state: ready, saved: false, reason: 'empty' };
 
+  const filed = assignGoods(ready.history, prepared.map((row) => {
+    const typed = String(row.line.name ?? '').trim();
+    return {
+      name: typed || row.name,
+      notation: row.line.notation || '',
+      storeId,
+      goodsId: typed ? (row.line.goodsId || null) : null,
+    };
+  }), newId);
+  prepared.forEach((row, i) => {
+    row.name = filed.rows[i].name || row.name;
+    row.goodsId = filed.rows[i].goodsId;
+  });
+
   const receiptId = newId();
   const savedAt = now.toISOString();
   const time = typeof draft.time === 'string' && /^\d{2}:\d{2}$/.test(draft.time) ? draft.time : null;
@@ -272,7 +287,7 @@ export function saveReceipt(state, draft, now = new Date()) {
     savedAt,
   };
 
-  let historyLines = ready.history.lines.slice();
+  let historyLines = filed.history.lines.slice();
   let items = ready.items.slice();
   let bought = ready.bought.slice();
   const priceBook = { ...(ready.priceBook || {}) };
@@ -315,8 +330,12 @@ export function saveReceipt(state, draft, now = new Date()) {
       discount: row.discount,
       amount: row.amount,
       volumeMl: row.line.volumeMl ?? null,
+      weightG: Number.isInteger(row.line.weightG) ? row.line.weightG : null,
       packCount: row.line.packCount ?? null,
       packUnit: row.line.packUnit ?? null,
+      notation: typeof row.line.notation === 'string' ? row.line.notation : '',
+      label: typeof row.line.label === 'string' ? row.line.label : '',
+      goodsId: row.goodsId || null,
       memo: '',
       source: 'receipt',
     });
@@ -327,10 +346,22 @@ export function saveReceipt(state, draft, now = new Date()) {
     items,
     bought,
     priceBook,
-    history: { ...ready.history, version: 1, receipts: [...(ready.history.receipts || []), receipt], lines: [...historyLines, ...added] },
+    history: { ...filed.history, version: HISTORY_VERSION, receipts: [...(filed.history.receipts || []), receipt], lines: [...historyLines, ...added] },
     settings: { ...ready.settings, lastStoreId: storeId },
   };
   return { state: next, saved: true, receipt };
+}
+
+/** 履歴の品を別の品へまとめる。明細の元の表記は残す。 */
+export function mergeProducts(state, sourceId, targetId) {
+  const ready = migratePurchases(state);
+  return { ...ready, history: mergeGoods(ready.history, sourceId, targetId, newId) };
+}
+
+/** まとめた品を分けて、元の品名に戻す。 */
+export function splitProducts(state, sourceId) {
+  const ready = migratePurchases(state);
+  return { ...ready, history: splitGoods(ready.history, sourceId) };
 }
 
 // ---- 検証・読み込み・書き出し ----

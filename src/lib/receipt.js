@@ -4,8 +4,8 @@ import { MAX_PRICE } from './price.js';
 // レシートの貼り付け文字を、明細と合計の照合に分ける。
 // 画面にも保存にも書かない。渡された文字列だけを見る（外には送らない）。
 //
-// 品名は categorize.normalize でそろえる。容量・個数・先頭の商品番号・税の印は品名から外す。
-// 元の行は raw にそのまま残す。
+// 品名は categorize.normalize でそろえる。容量・重さ・個数・先頭の商品番号・税の印は品名から外す。
+// 元の行は raw にそのまま残す。別名のキー（notation）は、容量や重さを残した元の表記を normalize したもの。
 // 会員番号・カード番号・電話番号らしい行は明細に入れず、stripSensitiveLines で本文からも落とす。
 // 品名の塊と金額の塊が別々に並ぶ列のずれは、順番で結び付けない（不明な行のまま返す）。
 
@@ -196,6 +196,28 @@ function extractVolume(s) {
   return { ml, rest };
 }
 
+function extractWeight(s) {
+  const m = s.match(/(\d+(?:\.\d+)?)\s*(キログラム|kg|グラム|g)(?![a-zA-Z])/i);
+  if (!m) return null;
+  const n = Number(m[1]);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  const unit = m[2].toLowerCase();
+  const grams = unit === 'g' || unit === 'グラム' ? Math.round(n) : Math.round(n * 1000);
+  if (grams <= 0 || grams > 100000) return null;
+  const rest = `${s.slice(0, m.index)} ${s.slice(m.index + m[0].length)}`.replace(/\s+/g, ' ').trim();
+  return { grams, rest };
+}
+
+/** 税の印・商品番号・末尾の ×数量を外した、容量つきの元の表記。 */
+function notationSource(s) {
+  let t = s.replace(/[×xX]\s*\d+\s*$/, '').trim();
+  t = stripTaxMarks(t);
+  t = stripProductCode(t);
+  t = stripTaxMarks(t);
+  t = stripProductCode(t);
+  return t;
+}
+
 function packUnitOf(unit) {
   if (unit === '個' || unit === 'ヶ' || unit === 'ケ' || unit === 'コ') return 'コ';
   return unit;
@@ -233,9 +255,10 @@ function stripProductCode(s) {
   return t.trim();
 }
 
-/** 品名から容量・個数・×数量・税の印・先頭の商品番号を外す。 */
+/** 品名から容量・重さ・個数・×数量・税の印・先頭の商品番号を外す。 */
 export function cleanProductLabel(label) {
   let t = prep(label).trim();
+  const notation = normalize(notationSource(t));
   let quantity = null;
   const times = t.match(/[×xX]\s*(\d+)\s*$/);
   if (times && (times.index > 0 || /^[×xX]/.test(t))) {
@@ -249,6 +272,12 @@ export function cleanProductLabel(label) {
     volumeMl = vol.ml;
     t = vol.rest;
   }
+  let weightG = null;
+  const weight = extractWeight(t);
+  if (weight) {
+    weightG = weight.grams;
+    t = weight.rest;
+  }
   let packCount = null;
   let packUnit = null;
   const pack = extractPack(t);
@@ -261,7 +290,7 @@ export function cleanProductLabel(label) {
   t = stripProductCode(t);
   t = stripTaxMarks(t);
   t = stripProductCode(t);
-  return { name: normalize(t), quantity, volumeMl, packCount, packUnit };
+  return { name: normalize(t), notation, quantity, volumeMl, weightG, packCount, packUnit };
 }
 
 function moneyValue(token) {
@@ -333,12 +362,15 @@ function finishItem({ raw, namePart, quantity, unitPrice, amount }) {
   if (!Number.isInteger(amt) || Math.abs(amt) > MAX_PRICE) return null;
   return {
     raw,
+    label: namePart,
     name: built.name,
+    notation: built.notation,
     quantity: qty,
     unitPrice: unit,
     amount: amt,
     discount: 0,
     volumeMl: built.volumeMl,
+    weightG: built.weightG,
     packCount: built.packCount,
     packUnit: built.packUnit,
   };
@@ -441,8 +473,11 @@ function attachDiscount(items, line) {
     amount: -yen,
     discount: yen,
     volumeMl: null,
+    weightG: null,
     packCount: null,
     packUnit: null,
+    notation: '',
+    label: line.namePart || '',
   });
 }
 

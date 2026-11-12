@@ -278,6 +278,55 @@ try {
   assert.equal(hist3.receipts.length, 2);
   assert.equal(await page.locator('.row', { hasText: '食パン' }).count(), 1); ok('ずれていても保存でき、リストの食パンは残る');
 
+  // 直した品名を覚え、次のレシートでは同じ店だけ自動で当たる
+  await page.click('.tab >> text=買い物リスト');
+  await page.click('[data-action="open-add"]');
+  await page.click('[data-testid="store-pills"] >> text=マツキヨ');
+  await page.fill('#add-input', '牛乳');
+  await page.click('.add-b');
+  await page.click('.sh-head >> text=閉じる');
+  ok('別名の確認用に、マツキヨへ牛乳を入れる');
+
+  await page.click('[data-action="open-receipt"]');
+  await page.fill('#receipt-text', ['マツキヨ', 'ｷﾞｭｳﾆｭｳ1L 198', '合計 198'].join('\n'));
+  await page.click('[data-action="receipt-read"]');
+  await page.locator('[data-testid="receipt-stores"]').getByRole('button', { name: 'マツキヨ', exact: true }).click();
+  const milk = page.locator('.rrow', { hasText: 'ｷﾞｭｳﾆｭｳ1L' });
+  assert.equal(await milk.locator('.rname').inputValue(), '');
+  assert.equal(await milk.locator('.rname').getAttribute('placeholder'), '（えらぶ）');
+  assert.equal(await milk.locator('.rsize').innerText(), '1000ml');
+  await milk.locator('.cand').filter({ hasText: /^牛乳$/ }).click();
+  assert.equal(await milk.locator('.rname').inputValue(), '牛乳');
+  ok('初めての表記は（えらぶ）で、候補の牛乳を選ぶと入る');
+
+  await page.click('[data-action="receipt-save"]');
+  assert.equal(await page.locator('.card', { hasText: 'マツキヨ' }).locator('.row', { hasText: '牛乳' }).count(), 0);
+  const learned = await readHist();
+  const milkGoods = learned.goods.find((g) => g.aliases.some((a) => a.storeId === 'matsukiyo' && a.notation === 'ぎゅうにゅう1l'));
+  assert.equal(milkGoods.name, '牛乳');
+  ok('保存すると、マツキヨのその表記を牛乳の別名として覚える');
+
+  await page.click('[data-action="open-add"]');
+  await page.click('[data-testid="store-pills"] >> text=Amazon');
+  await page.fill('#add-input', 'お茶');
+  await page.click('.add-b');
+  await page.click('.sh-head >> text=閉じる');
+
+  await page.click('[data-action="open-receipt"]');
+  await page.fill('#receipt-text', ['マツキヨ', 'ｷﾞｭｳﾆｭｳ1L 180', '合計 180'].join('\n'));
+  await page.click('[data-action="receipt-read"]');
+  const milk2 = page.locator('.rrow', { hasText: 'ｷﾞｭｳﾆｭｳ1L' });
+  assert.equal(await milk2.locator('.rname').inputValue(), '牛乳');
+  ok('同じ店の同じ表記は、次のレシートで牛乳が自動で入る');
+
+  await page.locator('[data-testid="receipt-stores"]').getByRole('button', { name: 'Amazon', exact: true }).click();
+  assert.equal(await milk2.locator('.rname').inputValue(), '');
+  assert.equal(await milk2.locator('.rname').getAttribute('placeholder'), '（えらぶ）');
+  assert.equal(await milk2.locator('.cand.on').count(), 0);
+  assert.equal(await milk2.locator('.cand').filter({ hasText: /^お茶$/ }).count(), 1);
+  ok('別の店では、覚えた別名を自動では入れない');
+  await page.click('.sh-head >> text=閉じる');
+
   assert.deepEqual(errors, [], 'console errors: ' + errors.join('\n'));
   console.log(`E2E OK (${step} steps)`);
 } catch (e) {

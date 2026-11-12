@@ -28,6 +28,9 @@ ${ui.exportText ? `<textarea class="field" id="export-text" readonly style="marg
 <input type="file" id="import-file" accept="application/json,.json" class="hidden"><div class="btnrow" style="margin:0 0 8px"><label class="btn" for="import-file">ファイルを選んで取り込む</label></div>
 <textarea class="field" id="import-text" placeholder="書き出したテキストをここに貼り付け"></textarea>
 <div class="btnrow"><button class="btn" data-action="import-run">取り込む</button></div></section>
+<section class="sec"><h2>品物のまとめ</h2>
+<p class="note">レシートで直した品名を、あとからひとつにまとめたり、分けたりできます。明細に残した元の表記は消えません。</p>
+<div class="btnrow"><button type="button" class="btn" data-action="open-goods">まとめる・分ける</button></div></section>
 <p class="ver">買い物リスト v${esc(version)} ・ データはこの端末の中だけに保存されます</p>
 </main>`;
 }
