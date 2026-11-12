@@ -94,6 +94,8 @@ main.plain{--dock:0px}
 .input input::placeholder{color:#a39a8e}
 .input.memo{border-style:dashed;margin-top:8px}
 .input .mic{display:flex}
+.suggests{display:flex;flex-direction:column;gap:6px;margin-top:8px}
+.suggests .cand{display:block;width:100%;text-align:left;overflow-wrap:anywhere}
 .acts{display:flex;gap:10px;margin-top:10px}
 .memo-b{flex:1;border:1.5px dashed var(--ink);border-radius:12px;padding:9px;text-align:center;font-size:15px;background:#fffdf8}
 .add-b{flex:1.4;border-radius:12px;padding:9px;text-align:center;font-size:16px;font-weight:600;background:var(--red);color:#fff;border:1.5px solid var(--red)}

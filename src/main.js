@@ -14,6 +14,8 @@ import { parsePrice } from './lib/price.js';
 import { parseReceipt } from './lib/receipt.js';
 import { buildReceiptDraft, editLine, exportNudge, keyboardInset, namesForStore } from './lib/receiptDraft.js';
 import { parseSpoken, speechSupported, listen } from './lib/speech.js';
+import { itemSuggestions } from './lib/suggest.js';
+import { esc } from './ui/util.js';
 
 const opened = S.load();
 let state = opened.problem?.scope === 'list' ? opened.state : S.pruneBought(opened.state);
@@ -268,7 +270,17 @@ function addFromSheet() {
   ui.memoOpen = false;
   render();
   refreshAddSheet();
+  refreshSuggestions();
   input.focus();
+}
+
+function refreshSuggestions() {
+  const input = overlay.querySelector('#add-input');
+  const box = overlay.querySelector('#suggests');
+  if (!input || !box) return;
+  const items = itemSuggestions(state.history, input.value);
+  box.innerHTML = items.map((item) => `<button type="button" class="cand" data-action="pick-suggest" data-name="${esc(item.name)}">${esc(item.name)}</button>`).join('');
+  box.classList.toggle('hidden', items.length === 0);
 }
 
 // ---- 音声 ----
@@ -444,6 +456,17 @@ const actions = {
   'save-edit': saveEdit,
   'pick-store': (id) => { ui.sheetStore = id; refreshAddSheet(); overlay.querySelector('#add-input').focus(); },
   add: addFromSheet,
+  'pick-suggest': (_, btn) => {
+    const input = overlay.querySelector('#add-input');
+    if (!input) return;
+    input.value = btn.dataset.name || '';
+    input.focus();
+    const box = overlay.querySelector('#suggests');
+    if (box) {
+      box.innerHTML = '';
+      box.classList.add('hidden');
+    }
+  },
   'toggle-memo': () => { ui.memoOpen = !ui.memoOpen; refreshAddSheet(); overlay.querySelector(ui.memoOpen ? '#memo-input' : '#add-input').focus(); },
   'undo-add': (id) => { ui.sheetAdded = ui.sheetAdded.filter((x) => x !== id); commit(S.removeItem(state, id)); refreshAddSheet(); overlay.querySelector('#add-input').focus(); },
   'undo-bought': (id) => { commit(S.undoBought(state, id)); const left = S.boughtToday(state); if (left.length) openBoughtSheet(); else closeSheet(); },
@@ -493,6 +516,10 @@ document.addEventListener('click', (e) => {
 });
 
 document.addEventListener('input', (e) => {
+  if (e.target?.id === 'add-input') {
+    refreshSuggestions();
+    return;
+  }
   if (ui.sheet !== 'receipt-confirm' || !ui.receipt) return;
   const row = e.target.closest?.('[data-line]');
   if (!row) return;
