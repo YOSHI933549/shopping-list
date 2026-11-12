@@ -1,2 +1,8 @@
 import { defineConfig } from 'vite';
-export default defineConfig({ base: './', test: { include: ['tests/**/*.test.js'] } });
+import { ocrAssetPlugin } from './scripts/ocr-assets.mjs';
+
+export default defineConfig({
+  base: './',
+  plugins: [ocrAssetPlugin()],
+  test: { include: ['tests/**/*.test.js'] },
+});

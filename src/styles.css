@@ -154,3 +154,13 @@ textarea.field{width:100%;min-height:96px;font-size:12px;font-family:ui-monospac
 .rtotals{font-size:14px;line-height:1.6;color:var(--ink);overflow-wrap:anywhere}
 .rnote{display:block}
 .sheet input,.sheet select,.sheet textarea{scroll-margin:12px}
+/* 撮って読む（試作。src/ocr とこの塊を消せば外せる） */
+.receipt-shoot{display:block;width:100%;margin-top:8px;border:1.5px dashed var(--ink);border-radius:12px;padding:9px 12px;font-size:16px;font-weight:600;background:#fffdf8;text-align:center}
+.receipt-shoot:disabled{opacity:.35}
+.rscan{margin-top:8px;padding:10px 12px;border:1.5px dashed var(--ink);border-radius:12px;background:rgba(255,253,248,.95)}
+.rscan[hidden],.rscan-track[hidden],.rscan-acts[hidden]{display:none !important}
+.rscan-msg{font-size:14px;line-height:1.6;color:var(--ink);overflow-wrap:anywhere}
+.rscan-track{height:8px;margin-top:8px;border:1.5px solid var(--ink);border-radius:4px;background:#fff;overflow:hidden}
+.rscan-track>span{display:block;height:100%;width:0;background:var(--ink2)}
+.rscan-acts{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.rscan-acts button{flex:1;min-width:7.5em;border:1.5px solid var(--ink);border-radius:12px;padding:8px 10px;font-size:14px;background:#fffdf8;text-align:center}

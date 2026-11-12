@@ -58,6 +58,15 @@ export function pasteSheetHtml() {
 <div class="sheet" role="dialog" aria-label="レシートを読む"><div class="grab"></div>
 <div class="sh-head"><h2>レシートを読む</h2><button type="button" class="btn-ghost" data-action="close-sheet">閉じる</button></div>
 <p class="note">iPhoneの「テキストをスキャン」や、写真アプリでコピーした文字を貼ってください。画像は保存しません。</p>
+<button type="button" class="receipt-shoot" data-testid="receipt-shoot" data-action="receipt-shoot">撮って読む</button>
+<input id="receipt-photo" class="hidden" type="file" accept="image/*" capture="environment" aria-label="レシートの写真">
+<div class="rscan" data-testid="receipt-scan" hidden aria-live="polite">
+<p class="rscan-msg" data-testid="receipt-scan-status"></p>
+<div class="rscan-track" data-testid="receipt-scan-track" hidden><span data-testid="receipt-scan-bar"></span></div>
+<div class="rscan-acts" data-testid="receipt-scan-actions" hidden>
+<button type="button" data-action="receipt-shoot">もう一度撮る</button>
+<button type="button" data-action="receipt-scan-back">文字を貼る</button>
+</div></div>
 <textarea id="receipt-text" class="rtext" placeholder="ここにレシートの文字を貼る"></textarea>
 <div class="acts"><button type="button" class="add-b" data-action="receipt-read">読む</button></div></div>`;
 }

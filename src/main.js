@@ -6,6 +6,8 @@ import { renderRegular } from './ui/regular.js';
 import { renderMypage } from './ui/mypage.js';
 import { addSheetHtml, boughtSheetHtml, editSheetHtml, storePills, recentCards } from './ui/sheets.js';
 import { confirmSheetHtml, pasteSheetHtml, totalsHtml } from './ui/receipt.js';
+import { applyScanView } from './ocr/view.js';
+import { scanFailureMessage, scanProgressLabel } from './ocr/messages.js';
 import { icon } from './lib/icons.js';
 import { parsePrice } from './lib/price.js';
 import { parseReceipt } from './lib/receipt.js';
@@ -19,6 +21,8 @@ const ui = { tab: 'list', filter: 'all', sheet: null, sheetStore: null, sheetAdd
 const pending = new Set();
 const speech = speechSupported();
 let stopListen = null;
+let scanGen = 0;
+let scanning = false;
 
 const app = document.getElementById('app');
 app.innerHTML = '<div id="view"></div><nav class="tabs"></nav>';
@@ -123,6 +127,11 @@ function saveEdit(id) {
 }
 function closeSheet() {
   stopListen?.();
+  scanGen += 1;
+  if (scanning) {
+    scanning = false;
+    import('./ocr/recognize.js').then((m) => m.releaseEngine());
+  }
   ui.sheet = null;
   ui.receipt = null;
   overlay.innerHTML = '';
@@ -157,6 +166,38 @@ function readReceiptText() {
   if (!text.trim()) { toast('文字を貼ってください'); return; }
   ui.receipt = buildReceiptDraft(parseReceipt(text), state, S.localDate());
   showReceiptConfirm();
+}
+
+function showScan(view) {
+  if (ui.sheet !== 'receipt-paste') return;
+  applyScanView(overlay, view);
+}
+
+async function scanReceiptFile(file) {
+  const gen = ++scanGen;
+  if (!file || !String(file.type || '').startsWith('image/')) {
+    showScan({ phase: 'fail', message: scanFailureMessage('image'), progress: 0 });
+    return;
+  }
+  scanning = true;
+  showScan({ phase: 'run', message: scanProgressLabel('loading tesseract core', 0), progress: 0 });
+  try {
+    const ocr = await import('./ocr/recognize.js');
+    const text = await ocr.recognizeReceiptFile(file, {
+      onProgress: (view) => { if (gen === scanGen) showScan(view); },
+    });
+    if (gen !== scanGen || ui.sheet !== 'receipt-paste') return;
+    const area = overlay.querySelector('#receipt-text');
+    if (area) area.value = text;
+    scanning = false;
+    ocr.releaseEngine();
+    readReceiptText();
+  } catch (err) {
+    if (gen !== scanGen || ui.sheet !== 'receipt-paste') return;
+    scanning = false;
+    const reason = err?.reason === 'image' || err?.reason === 'empty' ? err.reason : 'fail';
+    showScan({ phase: 'fail', message: scanFailureMessage(reason), progress: 0 });
+  }
 }
 
 function syncReceiptFromDom() {
@@ -333,6 +374,15 @@ const actions = {
   'open-add': openAddSheet,
   'open-receipt': openReceiptPaste,
   'receipt-read': readReceiptText,
+  'receipt-shoot': () => {
+    if (ui.sheet !== 'receipt-paste' || scanning) return;
+    overlay.querySelector('#receipt-photo')?.click();
+  },
+  'receipt-scan-back': () => {
+    if (ui.sheet !== 'receipt-paste' || scanning) return;
+    showScan({ phase: 'idle' });
+    overlay.querySelector('#receipt-text')?.focus();
+  },
   'pick-receipt-store': (id) => {
     if (!ui.receipt) return;
     syncReceiptFromDom();
@@ -480,6 +530,11 @@ document.addEventListener('change', async (e) => {
       if (name) { name.value = line.name; fitName(name); }
       refreshReceiptTotals();
     }
+  }
+  if (e.target.id === 'receipt-photo') {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (file) scanReceiptFile(file);
   }
   if (e.target.id === 'import-file' && e.target.files[0]) {
     const text = await e.target.files[0].text();

@@ -8,7 +8,11 @@ import { chromium } from 'playwright-core';
 
 export const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const dist = path.join(root, 'dist');
-const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.ttf': 'font/ttf', '.json': 'application/json', '.svg': 'image/svg+xml' };
+const TYPES = {
+  '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.ttf': 'font/ttf',
+  '.json': 'application/json', '.svg': 'image/svg+xml', '.wasm': 'application/wasm', '.gz': 'application/octet-stream',
+  '.txt': 'text/plain; charset=utf-8', '.png': 'image/png',
+};
 
 export function build() {
   execFileSync('npx', ['vite', 'build', '--logLevel', 'warn'], { cwd: root, stdio: 'inherit' });
