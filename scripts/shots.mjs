@@ -157,6 +157,37 @@ scenarios['20-receipt-unknown'] = {
   data: mk([]),
   run: (page) => pasteReceipt(page, 'マツキヨ\n牛乳 198\n◆今週のおすすめ◆\n合計 198'),
 };
+scenarios['21-receipt-scan'] = {
+  data: mk([]),
+  run: (page) => page.click('[data-action="open-receipt"]'),
+};
+scenarios['22-receipt-scan-reading'] = {
+  data: mk([]),
+  shotInRun: true,
+  run: async (page) => {
+    const held = [];
+    await page.route('**/ocr/**', (route) => { held.push(route); });
+    await page.click('[data-action="open-receipt"]');
+    const seen = page.waitForSelector('[data-testid="scan-progress"]');
+    await page.locator('#receipt-camera').setInputFiles(path.join(root, 'tests/fixtures/sample-receipt.png'));
+    await seen;
+    await page.evaluate(() => document.fonts.ready);
+    await page.screenshot({ path: path.join(out, '22-receipt-scan-reading.png') });
+    await Promise.all(held.map((route) => route.abort().catch(() => {})));
+  },
+};
+scenarios['23-receipt-scan-failed'] = {
+  data: mk([]),
+  run: async (page) => {
+    await page.click('[data-action="open-receipt"]');
+    await page.locator('#receipt-camera').setInputFiles({
+      name: 'memo.txt',
+      mimeType: 'text/plain',
+      buffer: Buffer.from('これは画像ではありません'),
+    });
+    await page.waitForSelector('[data-testid="scan-failed"]');
+  },
+};
 
 const confirmLines = [
   'ｷﾞｭｳﾆｭｳ1L 198',
@@ -245,9 +276,11 @@ for (const [name, sc] of Object.entries(scenarios)) {
   await page.goto(url);
   await page.evaluate(() => document.fonts.ready);
   if (sc.run) await sc.run(page);
-  await page.waitForTimeout(400);
-  await page.evaluate(() => document.fonts.ready);
-  await page.screenshot({ path: path.join(out, `${name}.png`) });
+  if (!sc.shotInRun) {
+    await page.waitForTimeout(400);
+    await page.evaluate(() => document.fonts.ready);
+    await page.screenshot({ path: path.join(out, `${name}.png`) });
+  }
   console.log('shot', name);
   await ctx.close();
 }

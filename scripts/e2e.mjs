@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
-import { build, serve, launch } from './lib.mjs';
+import fs from 'node:fs';
+import path from 'node:path';
+import { build, serve, launch, root } from './lib.mjs';
+import { countMatchingLines } from '../src/lib/receiptScan.js';
 
 build();
 const { server, url } = await serve();
@@ -326,6 +329,60 @@ try {
   assert.equal(await milk2.locator('.cand').filter({ hasText: /^お茶$/ }).count(), 1);
   ok('別の店では、覚えた別名を自動では入れない');
   await page.click('.sh-head >> text=閉じる');
+
+  // 撮って読む: 作り例の画像を端末内で読み、確認画面へ流す
+  const sampleLines = fs.readFileSync(path.join(root, 'tests/fixtures/sample-receipt.txt'), 'utf8').trim().split('\n');
+  await page.evaluate(() => {
+    const desc = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value');
+    Object.defineProperty(HTMLTextAreaElement.prototype, 'value', {
+      configurable: true,
+      enumerable: desc.enumerable,
+      get() { return desc.get.call(this); },
+      set(v) {
+        if (this.id === 'receipt-text') window.__scanText = String(v);
+        desc.set.call(this, v);
+      },
+    });
+  });
+  await page.click('[data-action="open-receipt"]');
+  const camera = page.locator('#receipt-camera');
+  assert.equal(await camera.getAttribute('accept'), 'image/*');
+  assert.equal(await camera.getAttribute('capture'), 'environment');
+  const photo = page.locator('#receipt-photo');
+  assert.equal(await photo.getAttribute('accept'), 'image/*');
+  assert.equal(await photo.getAttribute('capture'), null); ok('撮って読むはカメラ、写真から選ぶは画像ファイル');
+
+  await camera.setInputFiles({ name: 'memo.txt', mimeType: 'text/plain', buffer: Buffer.from('これは画像ではありません') });
+  await page.waitForSelector('[data-testid="scan-failed"]');
+  assert.equal(await page.locator('[data-action="receipt-scan-again"]').innerText(), 'もう一度撮る');
+  await page.click('[data-action="receipt-scan-paste"]');
+  await page.waitForSelector('[data-testid="scan-failed"]', { state: 'detached' });
+  assert.equal(await page.locator('#receipt-text').count(), 1); ok('画像でないファイルは失敗し、文字を貼るに戻れる');
+
+  const leaks = [];
+  const onReq = (req) => {
+    let host = '';
+    try { host = new URL(req.url()).hostname; } catch { host = req.url(); }
+    if (host && host !== '127.0.0.1') leaks.push(req.url());
+  };
+  page.on('request', onReq);
+  const sawProgress = page.waitForSelector('[data-testid="scan-progress"]');
+  await camera.setInputFiles(path.join(root, 'tests/fixtures/sample-receipt.png'));
+  await sawProgress;
+  await page.waitForSelector('[data-testid="receipt-rows"]', { timeout: 180000 });
+  page.off('request', onReq);
+  assert.deepEqual(leaks, [], '外部へ送信している: ' + leaks.join('\n'));
+  const scanText = await page.evaluate(() => window.__scanText || '');
+  const score = countMatchingLines(scanText, sampleLines);
+  console.log(`  OCR ${score.matched}/${score.total}`);
+  console.log(scanText.replace(/\n/g, '\\n'));
+  assert.ok(await page.locator('.rrow').count() >= 1);
+  assert.equal(await page.locator('.rraw', { hasText: '牛乳' }).count(), 1);
+  assert.equal(await page.locator('.rraw', { hasText: '卵' }).count(), 1); ok('作り例の画像を撮って読むと確認画面に明細が出る');
+  await page.click('.sh-head >> text=閉じる');
+  const hist4 = await readHist();
+  assert.equal(hist4.receipts.length, 3);
+  assert.equal(await page.locator('.row', { hasText: '食パン' }).count(), 1); ok('読み取りだけでは履歴を増やさず、リストも上書きしない');
 
   assert.deepEqual(errors, [], 'console errors: ' + errors.join('\n'));
   console.log(`E2E OK (${step} steps)`);

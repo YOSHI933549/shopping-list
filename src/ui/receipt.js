@@ -1,6 +1,7 @@
 import { UNSET_ID } from '../state/store.js';
 import { readYen, totalsLabel } from '../lib/receiptDraft.js';
 import { esc } from './util.js';
+import { scanEntryHtml } from './receiptScan.js';
 
 function storeButtons(state, draft) {
   return state.stores.filter((s) => s.id !== UNSET_ID).map((s) => {
@@ -71,6 +72,7 @@ export function pasteSheetHtml() {
 <div class="sheet" role="dialog" aria-label="レシートを読む"><div class="grab"></div>
 <div class="sh-head"><h2>レシートを読む</h2><button type="button" class="btn-ghost" data-action="close-sheet">閉じる</button></div>
 <p class="note">iPhoneの「テキストをスキャン」や、写真アプリでコピーした文字を貼ってください。画像は保存しません。</p>
+${scanEntryHtml()}
 <textarea id="receipt-text" class="rtext" placeholder="ここにレシートの文字を貼る"></textarea>
 <div class="acts"><button type="button" class="add-b" data-action="receipt-read">読む</button></div></div>`;
 }
