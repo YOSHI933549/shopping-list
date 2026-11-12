@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { build, serve, launch } from './lib.mjs';
+import { scoreReceiptLines } from '../src/ocr/score.js';
 
 build();
 const { server, url } = await serve();
@@ -8,7 +11,13 @@ const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, de
 const page = await ctx.newPage();
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));
-page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+page.on('console', (m) => {
+  if (m.type() !== 'error') return;
+  const text = m.text();
+  // 整数版の日本語データには無い旧パラメータを、Tesseract が起動時に探す。読み取りには影響しない。
+  if (text.startsWith('Warning: Parameter not found:')) return;
+  errors.push(text);
+});
 page.on('dialog', (d) => d.accept());
 let step = 0;
 const ok = (msg) => console.log(`  ✓ ${++step}. ${msg}`);
@@ -277,6 +286,63 @@ try {
   const hist3 = await readHist();
   assert.equal(hist3.receipts.length, 2);
   assert.equal(await page.locator('.row', { hasText: '食パン' }).count(), 1); ok('ずれていても保存でき、リストの食パンは残る');
+
+  // 撮って読む: 写真を選ぶまで学習データは取らない。画像でないファイルは失敗から戻れる。
+  const requests = [];
+  page.on('request', (req) => requests.push(req.url()));
+  await page.click('[data-action="open-receipt"]');
+  const photo = page.locator('#receipt-photo');
+  assert.equal(await photo.getAttribute('accept'), 'image/*');
+  assert.equal(await photo.getAttribute('capture'), 'environment');
+  assert.equal(await page.getByRole('button', { name: '撮って読む' }).isVisible(), true);
+  assert.equal(requests.some((u) => u.includes('/ocr/') || u.includes('jsdelivr') || u.includes('tessdata')), false);
+  ok('撮って読むはカメラ入力で、開いただけでは学習データを読まない');
+
+  await photo.setInputFiles({ name: 'note.txt', mimeType: 'text/plain', buffer: Buffer.from('not an image') });
+  await page.waitForFunction(() => document.querySelector('[data-testid="receipt-scan-status"]')?.textContent === '画像を読めませんでした');
+  assert.equal(await page.getByRole('button', { name: 'もう一度撮る' }).isVisible(), true);
+  assert.equal(await page.getByRole('button', { name: '文字を貼る' }).isVisible(), true);
+  ok('画像でないファイルは失敗し、もう一度撮ると文字を貼るに戻れる');
+  await page.getByRole('button', { name: '文字を貼る' }).click();
+  assert.equal(await page.locator('[data-testid="receipt-scan"]').isHidden(), true);
+  assert.equal(await page.locator('#receipt-text').evaluate((el) => el === document.activeElement), true);
+  ok('文字を貼るで貼る欄に戻る');
+
+  const historyBefore = await page.evaluate(() => localStorage.getItem('kaimono-history-v1'));
+  const listBefore = await page.evaluate(() => localStorage.getItem('kaimono-list-v1'));
+  await page.evaluate(() => {
+    const proto = HTMLTextAreaElement.prototype;
+    const desc = Object.getOwnPropertyDescriptor(proto, 'value');
+    Object.defineProperty(proto, 'value', {
+      configurable: true,
+      get() { return desc.get.call(this); },
+      set(v) {
+        if (this.id === 'receipt-text') window.__scanText = v;
+        desc.set.call(this, v);
+      },
+    });
+  });
+  const sample = path.join(path.dirname(fileURLToPath(import.meta.url)), '../tests/fixtures/sample-receipt.png');
+  await photo.setInputFiles(sample);
+  await page.waitForSelector('[data-testid="receipt-rows"]', { timeout: 180000 });
+  const scanned = await page.evaluate(() => window.__scanText || '');
+  const scored = scoreReceiptLines(scanned);
+  console.log(`  OCR ${scored.correct}/${scored.total}`);
+  console.log(scanned);
+  assert.equal(await page.locator('.rname', { hasText: '牛乳' }).count(), 1);
+  assert.equal(await page.locator('.rname', { hasText: '卵' }).count(), 1);
+  assert.equal(await page.locator('.rname', { hasText: '食パン' }).count(), 1);
+  assert.match(await page.locator('[data-testid="receipt-sum"]').innerText(), /584/);
+  ok('作り例の写真を撮って読むと、確認画面に牛乳・卵・食パンが出る');
+  assert.equal(await page.evaluate(() => localStorage.getItem('kaimono-history-v1')), historyBefore);
+  assert.equal(await page.evaluate(() => localStorage.getItem('kaimono-list-v1')), listBefore);
+  assert.equal(await page.locator('.row', { hasText: '食パン' }).count(), 1);
+  const outside = requests.filter((u) => !u.startsWith(url) && !u.startsWith('blob:') && !u.startsWith('data:'));
+  console.log(requests.filter((u) => u.includes('/ocr/')).map((u) => u.replace(url, '/')).join('\n'));
+  assert.deepEqual(outside, [], `外への通信: ${outside.join('\n')}`);
+  assert.equal(requests.some((u) => u.includes('/ocr/lang/jpn.traineddata.gz')), true);
+  assert.equal(requests.some((u) => u.includes('/ocr/worker.min.js')), true);
+  ok('読み取りは同じサイトの日本語データだけで、履歴とリストは書き換わらない');
 
   assert.deepEqual(errors, [], 'console errors: ' + errors.join('\n'));
   console.log(`E2E OK (${step} steps)`);

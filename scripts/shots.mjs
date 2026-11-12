@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { priceKey } from '../src/lib/price.js';
+import { scanProgressLabel } from '../src/ocr/messages.js';
 import { build, serve, launch, root } from './lib.mjs';
 
 build();
@@ -156,6 +157,33 @@ scenarios['19-receipt-mismatch'] = {
 scenarios['20-receipt-unknown'] = {
   data: mk([]),
   run: (page) => pasteReceipt(page, 'マツキヨ\n牛乳 198\n◆今週のおすすめ◆\n合計 198'),
+};
+scenarios['21-receipt-shoot'] = {
+  data: mk([]),
+  run: (page) => page.click('[data-action="open-receipt"]'),
+};
+scenarios['22-receipt-scan'] = {
+  data: mk([]),
+  run: async (page) => {
+    await page.click('[data-action="open-receipt"]');
+    const label = scanProgressLabel('recognizing text', 0.42);
+    await page.evaluate((text) => {
+      const scan = document.querySelector('[data-testid="receipt-scan"]');
+      scan.hidden = false;
+      document.querySelector('[data-testid="receipt-scan-status"]').textContent = text;
+      document.querySelector('[data-testid="receipt-scan-track"]').hidden = false;
+      document.querySelector('[data-testid="receipt-scan-bar"]').style.width = '42%';
+      document.querySelector('[data-testid="receipt-shoot"]').disabled = true;
+    }, label);
+  },
+};
+scenarios['23-receipt-scan-fail'] = {
+  data: mk([]),
+  run: async (page) => {
+    await page.click('[data-action="open-receipt"]');
+    await page.locator('#receipt-photo').setInputFiles({ name: 'note.txt', mimeType: 'text/plain', buffer: Buffer.from('x') });
+    await page.getByRole('button', { name: 'もう一度撮る' }).waitFor();
+  },
 };
 
 for (const [name, sc] of Object.entries(scenarios)) {
