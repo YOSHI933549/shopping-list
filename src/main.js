@@ -7,6 +7,8 @@ import { renderMypage } from './ui/mypage.js';
 import { addSheetHtml, boughtSheetHtml, editSheetHtml, storePills, recentCards } from './ui/sheets.js';
 import { goodsSheetHtml } from './ui/goods.js';
 import { confirmSheetHtml, pasteSheetHtml, totalsHtml } from './ui/receipt.js';
+import { scanStatusHtml } from './ui/receiptScan.js';
+import { runReceiptScan } from './ocr/runScan.js';
 import { icon } from './lib/icons.js';
 import { parsePrice } from './lib/price.js';
 import { parseReceipt } from './lib/receipt.js';
@@ -20,6 +22,7 @@ const ui = { tab: 'list', filter: 'all', sheet: null, sheetStore: null, sheetAdd
 const pending = new Set();
 const speech = speechSupported();
 let stopListen = null;
+let scanToken = 0;
 
 const app = document.getElementById('app');
 app.innerHTML = '<div id="view"></div><nav class="tabs"></nav>';
@@ -124,6 +127,7 @@ function saveEdit(id) {
 }
 function closeSheet() {
   stopListen?.();
+  scanToken += 1;
   ui.sheet = null;
   ui.receipt = null;
   ui.goodsPick = null;
@@ -136,10 +140,38 @@ function showGoods() {
 }
 
 function openReceiptPaste() {
+  scanToken += 1;
   ui.sheet = 'receipt-paste';
   ui.receipt = null;
   overlay.innerHTML = pasteSheetHtml();
   overlay.querySelector('#receipt-text').focus();
+}
+
+function showScan(view) {
+  const el = overlay.querySelector('#scan-status');
+  if (!el || ui.sheet !== 'receipt-paste') return;
+  el.innerHTML = scanStatusHtml(view);
+  overlay.querySelector('.scan-entry')?.classList.toggle('is-busy', view?.phase === 'reading');
+}
+
+function startReceiptScan(file) {
+  const token = ++scanToken;
+  const current = () => token === scanToken && ui.sheet === 'receipt-paste';
+  return runReceiptScan(file, {
+    isCurrent: current,
+    onProgress: (view) => { if (current()) showScan(view); },
+  }).then((text) => {
+    if (!current()) return;
+    if (text == null || !String(text).trim()) {
+      showScan({ phase: 'failed' });
+      return;
+    }
+    const area = overlay.querySelector('#receipt-text');
+    if (area) area.value = text;
+    readReceiptText();
+  }).catch(() => {
+    if (current()) showScan({ phase: 'failed' });
+  });
 }
 
 function fitName(el) {
@@ -340,6 +372,18 @@ const actions = {
   'open-add': openAddSheet,
   'open-receipt': openReceiptPaste,
   'receipt-read': readReceiptText,
+  'receipt-scan-again': () => {
+    if (ui.sheet !== 'receipt-paste') return;
+    const input = overlay.querySelector('#receipt-camera');
+    if (!input) return;
+    input.value = '';
+    input.click();
+  },
+  'receipt-scan-paste': () => {
+    if (ui.sheet !== 'receipt-paste') return;
+    showScan(null);
+    overlay.querySelector('#receipt-text')?.focus();
+  },
   'pick-receipt-store': (id) => {
     if (!ui.receipt) return;
     syncReceiptFromDom();
@@ -513,6 +557,12 @@ document.addEventListener('submit', (e) => {
 
 document.addEventListener('change', async (e) => {
   if (e.target.id === 'receipt-date' && ui.receipt) ui.receipt.date = e.target.value;
+  if ((e.target.id === 'receipt-camera' || e.target.id === 'receipt-photo') && e.target.files?.[0]) {
+    const file = e.target.files[0];
+    e.target.value = '';
+    startReceiptScan(file);
+    return;
+  }
   if (e.target.id === 'import-file' && e.target.files[0]) {
     const text = await e.target.files[0].text();
     e.target.value = '';
