@@ -5,6 +5,7 @@ import { renderList } from './ui/list.js';
 import { renderRegular } from './ui/regular.js';
 import { renderMypage } from './ui/mypage.js';
 import { addSheetHtml, boughtSheetHtml, editSheetHtml, storePills, recentCards } from './ui/sheets.js';
+import { goodsSheetHtml } from './ui/goods.js';
 import { confirmSheetHtml, pasteSheetHtml, totalsHtml } from './ui/receipt.js';
 import { icon } from './lib/icons.js';
 import { parsePrice } from './lib/price.js';
@@ -15,7 +16,7 @@ import { parseSpoken, speechSupported, listen } from './lib/speech.js';
 const opened = S.load();
 let state = opened.problem?.scope === 'list' ? opened.state : S.pruneBought(opened.state);
 let loadProblem = opened.problem;
-const ui = { tab: 'list', filter: 'all', sheet: null, sheetStore: null, sheetAdded: [], memoOpen: false, exportText: '', receipt: null, nudge: '' };
+const ui = { tab: 'list', filter: 'all', sheet: null, sheetStore: null, sheetAdded: [], memoOpen: false, exportText: '', receipt: null, nudge: '', goodsPick: null };
 const pending = new Set();
 const speech = speechSupported();
 let stopListen = null;
@@ -125,7 +126,13 @@ function closeSheet() {
   stopListen?.();
   ui.sheet = null;
   ui.receipt = null;
+  ui.goodsPick = null;
   overlay.innerHTML = '';
+}
+
+function showGoods() {
+  ui.sheet = 'goods';
+  overlay.innerHTML = goodsSheetHtml(state, { picking: ui.goodsPick });
 }
 
 function openReceiptPaste() {
@@ -346,6 +353,41 @@ const actions = {
     showReceiptConfirm();
   },
   'receipt-save': saveReceiptFromSheet,
+  'pick-candidate': (id, btn) => {
+    if (!ui.receipt) return;
+    syncReceiptFromDom();
+    const line = ui.receipt.lines.find((l) => l.key === id);
+    if (!line) return;
+    Object.assign(line, editLine(line, 'name', btn.dataset.name || ''));
+    if (btn.dataset.goods) line.goodsId = btn.dataset.goods;
+    line.chosen = true;
+    showReceiptConfirm();
+  },
+  'open-goods': () => {
+    if (listBlocked()) { toast('読めなかったデータが残っています。先に知らせを確認してください'); return; }
+    ui.goodsPick = null;
+    showGoods();
+  },
+  'goods-merge': (id) => { ui.goodsPick = id; showGoods(); },
+  'goods-back': () => { ui.goodsPick = null; showGoods(); },
+  'goods-into': (id) => {
+    if (listBlocked()) { toast('読めなかったデータが残っています。先に知らせを確認してください'); return; }
+    if (!ui.goodsPick) return;
+    state = S.mergeProducts(state, ui.goodsPick, id);
+    ui.goodsPick = null;
+    S.save(state);
+    render();
+    showGoods();
+    toast('まとめました');
+  },
+  'goods-split': (id) => {
+    if (listBlocked()) { toast('読めなかったデータが残っています。先に知らせを確認してください'); return; }
+    state = S.splitProducts(state, id);
+    S.save(state);
+    render();
+    showGoods();
+    toast('分けました');
+  },
   'open-export': () => {
     ui.tab = 'mypage';
     ui.nudge = '';
@@ -471,16 +513,6 @@ document.addEventListener('submit', (e) => {
 
 document.addEventListener('change', async (e) => {
   if (e.target.id === 'receipt-date' && ui.receipt) ui.receipt.date = e.target.value;
-  if (e.target.classList?.contains('rpick') && ui.receipt) {
-    const row = e.target.closest('[data-line]');
-    const line = ui.receipt.lines.find((l) => l.key === row?.dataset.line);
-    if (line && e.target.value) {
-      Object.assign(line, editLine(line, 'name', e.target.value));
-      const name = row.querySelector('.rname');
-      if (name) { name.value = line.name; fitName(name); }
-      refreshReceiptTotals();
-    }
-  }
   if (e.target.id === 'import-file' && e.target.files[0]) {
     const text = await e.target.files[0].text();
     e.target.value = '';

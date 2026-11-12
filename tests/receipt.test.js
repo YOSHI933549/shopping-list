@@ -300,16 +300,21 @@ describe('商品番号と税の印と容量', () => {
     expect(got.items[0].name).not.toContain('4901234567890');
     expect(got.matches).toBe(true);
     expect(cleanProductLabel('No.12 牛乳500ml')).toEqual({
-      name: '牛乳', quantity: null, volumeMl: 500, packCount: null, packUnit: null,
+      name: '牛乳', notation: '牛乳500ml', quantity: null, volumeMl: 500, weightG: null, packCount: null, packUnit: null,
     });
+    expect(cleanProductLabel('牛乳1L')).toMatchObject({ name: '牛乳', notation: '牛乳1l', volumeMl: 1000, weightG: null });
+    expect(cleanProductLabel('ヨーグルト350g')).toMatchObject({ name: 'よーぐると', weightG: 350, volumeMl: null });
+    expect(cleanProductLabel('ｷﾞｭｳﾆｭｳ1L').notation).toBe('ぎゅうにゅう1l');
     expect(cleanProductLabel('軽 卵10個入り ×2')).toMatchObject({
       name: '卵', quantity: 2, packCount: 10, packUnit: 'コ', volumeMl: null,
     });
   });
 
-  it('1.5L は 1500ml。グラムは品名に残す', () => {
+  it('1.5L は 1500ml。350g は品名から外して重さにする', () => {
     const got = parseReceipt('ｼﾞｭｰｽ1.5L 180\nﾖｰｸﾞﾙﾄ350g 120\n合計 300');
-    expect(got.items[0]).toMatchObject({ name: 'じゅーす', volumeMl: 1500, amount: 180 });
-    expect(got.items[1]).toMatchObject({ name: 'よーぐると350g', volumeMl: null, amount: 120 });
+    expect(got.items[0]).toMatchObject({ name: 'じゅーす', volumeMl: 1500, weightG: null, amount: 180 });
+    expect(got.items[1]).toMatchObject({ name: 'よーぐると', volumeMl: null, weightG: 350, amount: 120 });
+    expect(got.items[1].raw).toBe('ﾖｰｸﾞﾙﾄ350g 120');
+    expect(parseReceipt('牛乳1L 198\n合計 198').items[0]).toMatchObject({ name: '牛乳', volumeMl: 1000, amount: 198 });
   });
 });

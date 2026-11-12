@@ -1,15 +1,17 @@
 import { normalize } from './categorize.js';
 
 // 買った記録（明細）とレシート。30日で消える bought とは別に残す。
-// 品物の台帳（別名の記憶）はまだ持たない。未知の項目は捨てずに通す。
+// version 2 で品物の台帳 goods を足す。別名は「店 × normalize した元の表記」。
+// 未知の項目は捨てずに通す。版1（台帳なし）は台帳を空で足すだけで、明細は消さない。
 // date が null の行は日付不明（以前の値段メモの最新1件）。
 // 明細の source: 'check' は丸、'migrate' は移行、'receipt' はレシート。
 export const HISTORY_KEY = 'kaimono-history-v1';
+export const HISTORY_VERSION = 2;
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 export function emptyHistory() {
-  return { version: 1, lines: [], receipts: [] };
+  return { version: HISTORY_VERSION, lines: [], receipts: [], goods: [] };
 }
 
 export function copyPlain(obj) {
@@ -61,17 +63,54 @@ function sanitizeReceiptList(list) {
   return list.map((r, index) => sanitizeReceipt(r, index, seen));
 }
 
+function dedupeAliases(list) {
+  const out = [];
+  for (const a of list || []) {
+    if (!a || typeof a !== 'object' || Array.isArray(a)) continue;
+    if (typeof a.storeId !== 'string' || typeof a.notation !== 'string' || !a.notation) continue;
+    if (out.some((x) => x.storeId === a.storeId && x.notation === a.notation)) continue;
+    out.push({ ...copyPlain(a), storeId: a.storeId, notation: a.notation });
+  }
+  return out;
+}
+
+/** 品物の台帳。壊れた要素も残す。別名は店と表記が同じものを一つにする。 */
+export function sanitizeGoods(list) {
+  if (!Array.isArray(list)) return [];
+  const seen = new Set();
+  return list.map((g, index) => {
+    if (!g || typeof g !== 'object' || Array.isArray(g)) {
+      return { id: `kept_g_${index}`, name: '', aliases: [], mergedInto: null, raw: g };
+    }
+    let id = typeof g.id === 'string' && g.id ? g.id : `kept_g_${index}`;
+    if (seen.has(id)) id = `${id}_${index}`;
+    seen.add(id);
+    const next = {
+      ...copyPlain(g),
+      id,
+      name: typeof g.name === 'string' ? g.name : '',
+      aliases: dedupeAliases(Array.isArray(g.aliases) ? g.aliases : []),
+      mergedInto: typeof g.mergedInto === 'string' && g.mergedInto ? g.mergedInto : null,
+    };
+    if (!Array.isArray(g.aliases) && g.aliases !== undefined) next.keptAliases = g.aliases;
+    return next;
+  });
+}
+
 /** 履歴オブジェクトを整形する。知らない項目は残す。壊れた行も raw として残す。 */
 export function sanitizeHistory(h) {
   if (h == null) return emptyHistory();
-  if (!h || typeof h !== 'object' || Array.isArray(h)) return { version: 1, lines: [], receipts: [], kept: h };
+  if (!h || typeof h !== 'object' || Array.isArray(h)) return { version: HISTORY_VERSION, lines: [], receipts: [], goods: [], kept: h };
   const base = copyPlain(h);
   const keptReceipts = Array.isArray(h.receipts) || h.receipts === undefined ? undefined : h.receipts;
   const receipts = Array.isArray(h.receipts) ? sanitizeReceiptList(h.receipts) : [];
+  const goods = sanitizeGoods(h.goods);
+  const keptGoods = Array.isArray(h.goods) || h.goods === undefined ? undefined : h.goods;
   if (!Array.isArray(h.lines)) {
-    const out = { ...base, version: 1, lines: [], receipts };
+    const out = { ...base, version: HISTORY_VERSION, lines: [], receipts, goods };
     if (h.lines !== undefined) out.keptLines = h.lines;
     if (keptReceipts !== undefined) out.keptReceipts = keptReceipts;
+    if (keptGoods !== undefined) out.keptGoods = keptGoods;
     return out;
   }
   const lines = [];
@@ -100,8 +139,9 @@ export function sanitizeHistory(h) {
     if (typeof line.boughtAt !== 'string' && line.boughtAt != null) next.keptBoughtAt = line.boughtAt;
     lines.push(next);
   });
-  const out = { ...base, version: 1, lines, receipts };
+  const out = { ...base, version: HISTORY_VERSION, lines, receipts, goods };
   if (keptReceipts !== undefined) out.keptReceipts = keptReceipts;
+  if (keptGoods !== undefined) out.keptGoods = keptGoods;
   if (out.keptLines === undefined) delete out.keptLines;
   return out;
 }
@@ -185,7 +225,7 @@ export function migratePurchases(state) {
     });
   }
 
-  return { ...state, history: { ...history, version: 1, lines } };
+  return { ...state, history: { ...history, version: HISTORY_VERSION, lines } };
 }
 
 /** 同じ id の行は両方の項目を残して一つにまとめる。 */
@@ -209,7 +249,18 @@ export function unionHistory(a, b) {
   for (const rec of right.receipts) {
     receiptMap.set(rec.id, receiptMap.has(rec.id) ? mergeLine(receiptMap.get(rec.id), rec) : rec);
   }
-  const out = { ...left, ...right, version: 1, lines: [...map.values()], receipts: [...receiptMap.values()] };
+  const mergeGood = (a, b) => {
+    const aliases = dedupeAliases([...(a.aliases || []), ...(b.aliases || [])]);
+    const out = { ...a, ...b, aliases, mergedInto: b.mergedInto || a.mergedInto || null };
+    if (!out.name) out.name = a.name || '';
+    return out;
+  };
+  const goodsMap = new Map();
+  for (const g of left.goods) goodsMap.set(g.id, g);
+  for (const g of right.goods) {
+    goodsMap.set(g.id, goodsMap.has(g.id) ? mergeGood(goodsMap.get(g.id), g) : g);
+  }
+  const out = { ...left, ...right, version: HISTORY_VERSION, lines: [...map.values()], receipts: [...receiptMap.values()], goods: [...goodsMap.values()] };
   if (out.keptLines === undefined) delete out.keptLines;
   return out;
 }

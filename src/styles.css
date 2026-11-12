@@ -149,6 +149,17 @@ textarea.field{width:100%;min-height:96px;font-size:12px;font-family:ui-monospac
 .rnums input,.rdiscount input{width:4.6em;max-width:100%;border:1.5px solid var(--ink);border-radius:8px;background:#fff;padding:4px 6px;font-size:16px;color:var(--ink);text-align:right}
 .rtimes{flex:none}
 .rpick{display:block;margin-top:6px;max-width:100%;border:1.5px solid var(--ink);border-radius:10px;background:#fff;padding:4px 8px;font-size:14px}
+.rname::placeholder{color:var(--ink2)}
+.rsize{margin-top:4px;font-size:12px;color:var(--ink2);line-height:1.4;overflow-wrap:anywhere}
+.rcands{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;min-width:0}
+.cand{display:inline-block;min-width:0;max-width:100%;border:1.5px solid var(--ink);border-radius:18px 15px 17px 14px;padding:3px 8px;font-size:13px;background:#fffdf8;overflow-wrap:anywhere;white-space:normal;text-align:left;line-height:1.35}
+.cand.on{background:var(--ink);color:var(--paper)}
+.goods-list{margin-top:8px}
+.goods-row{padding:8px 0;border-bottom:1px solid var(--line);min-width:0}
+.goods-row:last-child{border-bottom:none}
+.goods-name{font-size:16px;line-height:1.35;overflow-wrap:anywhere}
+.goods-meta{font-size:12px;color:var(--ink2);line-height:1.45;overflow-wrap:anywhere;margin-top:2px}
+.goods-acts{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
 .rdiscount{margin-top:6px;font-size:14px;color:var(--ink);display:flex;align-items:center;gap:4px;flex-wrap:wrap}
 .runk{flex:1;font-size:13px;color:var(--ink2)}
 .rtotals{font-size:14px;line-height:1.6;color:var(--ink);overflow-wrap:anywhere}
