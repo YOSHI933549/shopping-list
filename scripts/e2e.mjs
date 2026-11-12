@@ -21,6 +21,11 @@ try {
   await page.evaluate(() => document.fonts.ready);
   assert.ok(await page.getByText('リストは空っぽです').isVisible()); ok('空の状態');
 
+  await page.click('[data-action="open-add"]');
+  await page.fill('#add-input', '牛乳');
+  assert.equal(await page.locator('#suggests .cand').count(), 0);
+  await page.click('.sh-head >> text=閉じる'); ok('履歴が無いときは候補を出さない');
+
   // 追加シート: Enter で連続追加（フォーカス維持）
   await page.click('[data-action="open-add"]');
   const input = page.locator('#add-input');
@@ -383,6 +388,20 @@ try {
   const hist4 = await readHist();
   assert.equal(hist4.receipts.length, 3);
   assert.equal(await page.locator('.row', { hasText: '食パン' }).count(), 1); ok('読み取りだけでは履歴を増やさず、リストも上書きしない');
+
+  await page.click('[data-action="open-add"]');
+  await page.fill('#add-input', 'ぎゅう');
+  const suggest = page.locator('#suggests .cand');
+  await suggest.first().waitFor();
+  assert.equal(await suggest.count(), 1);
+  assert.equal((await suggest.innerText()).trim(), '牛乳');
+  await suggest.click();
+  assert.equal(await page.locator('#add-input').inputValue(), '牛乳');
+  assert.equal(await page.locator('#suggests .cand').count(), 0);
+  await page.fill('#add-input', '候補を使わない品');
+  assert.equal(await page.locator('#suggests .cand').count(), 0);
+  await page.press('#add-input', 'Enter');
+  assert.equal(await page.locator('.recent', { hasText: '候補を使わない品' }).count(), 1); ok('候補を押すとまとめ後の名前が入り、使わずに別の品も入れられる');
 
   assert.deepEqual(errors, [], 'console errors: ' + errors.join('\n'));
   console.log(`E2E OK (${step} steps)`);

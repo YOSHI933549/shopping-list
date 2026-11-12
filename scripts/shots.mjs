@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { priceKey } from '../src/lib/price.js';
+import { SUGGESTION_LIMIT } from '../src/lib/suggest.js';
 import { build, serve, launch, root } from './lib.mjs';
 
 build();
@@ -264,6 +265,69 @@ scenarios['24-goods-max'] = {
   scale: 1,
   run: openGoods,
 };
+
+scenarios['25-suggest-zero'] = {
+  data: mk([]),
+  run: async (page) => {
+    await page.click('[data-action="open-add"]');
+    await page.fill('#add-input', '牛乳');
+  },
+};
+scenarios['26-suggest-one'] = {
+  data: mk([], {
+    history: {
+      version: 2,
+      lines: [{
+        id: 'l1', goodsId: 'g1', name: 'ぎゅうにゅう', storeId: 'aeon', date: isoOff(-3),
+        price: 198, source: 'receipt', memo: '', notation: 'ぎゅうにゅう1l',
+      }],
+      receipts: [],
+      goods: [
+        { id: 'g1', name: 'ぎゅうにゅう', aliases: [{ storeId: 'aeon', notation: 'ぎゅうにゅう1l' }], mergedInto: 'g2' },
+        { id: 'g2', name: '牛乳', aliases: [{ storeId: 'matsukiyo', notation: 'ぎゅうにゅう' }], mergedInto: null },
+      ],
+    },
+  }),
+  run: async (page) => {
+    await page.click('[data-action="open-add"]');
+    await page.fill('#add-input', 'ｷﾞｭｳﾆｭｳ');
+    await page.waitForSelector('#suggests .cand');
+  },
+};
+const suggestNames = [
+  '牛乳',
+  '牛肉',
+  '牛すじのとても長い名前の国産きめ細かな煮込み用（大容量）',
+  '牛タン',
+  '牛丼',
+  '牛もつ',
+  '牛脂',
+];
+const suggestLines = [];
+suggestNames.forEach((name, index) => {
+  const times = suggestNames.length - index;
+  for (let n = 0; n < times; n += 1) {
+    suggestLines.push({
+      id: `s${index}-${n}`, name, storeId: 'aeon', date: isoOff(-(n + 1)), price: 100 + index,
+      source: 'check', memo: '', itemId: null,
+    });
+  }
+});
+scenarios['27-suggest-max'] = {
+  data: mk([], { history: { version: 2, lines: suggestLines, receipts: [], goods: [] } }),
+  run: async (page) => {
+    await page.click('[data-action="open-add"]');
+    await page.fill('#add-input', '牛');
+    await page.locator('#suggests .cand').nth(SUGGESTION_LIMIT - 1).waitFor();
+    assertSuggestCount(page);
+  },
+};
+
+function assertSuggestCount(page) {
+  return page.locator('#suggests .cand').count().then((count) => {
+    if (count !== SUGGESTION_LIMIT) throw new Error(`候補は${SUGGESTION_LIMIT}件のはずが ${count}件`);
+  });
+}
 
 for (const [name, sc] of Object.entries(scenarios)) {
   const ctx = await browser.newContext({ viewport: sc.viewport || { width: 390, height: 844 }, deviceScaleFactor: sc.scale || 3, locale: 'ja-JP' });

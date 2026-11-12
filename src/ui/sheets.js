@@ -23,6 +23,7 @@ export function addSheetHtml(state, sel, speech) {
 <div class="label">どのお店で買う？</div>
 <div class="spills" data-testid="store-pills">${storePills(state, sel)}</div>
 <div class="input"><input id="add-input" type="text" enterkeyhint="done" autocomplete="off" autocapitalize="off" placeholder="${esc(storeName(state, sel))}に入れる品">${speech ? `<button class="mic" data-action="mic" aria-label="話して追加">${icon('mic', 24)}</button>` : ''}</div>
+<div class="suggests hidden" id="suggests" data-testid="suggests"></div>
 <div class="input memo hidden" id="memo-wrap"><input id="memo-input" type="text" autocomplete="off" placeholder="メモ（次に入れる品につきます）"></div>
 <div class="input price"><span class="yen">値段（円）</span><input id="price-input" type="text" inputmode="numeric" enterkeyhint="done" autocomplete="off" placeholder="任意"></div>
 <div class="acts"><button class="memo-b" data-action="toggle-memo">＋メモ</button><button class="add-b" data-action="add">追加</button></div></div>`;

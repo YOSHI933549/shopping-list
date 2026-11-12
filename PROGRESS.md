@@ -10,6 +10,10 @@
 - 実機(iOS Safari)での確認・ソフトキーボード表示時のシート位置は未確認。
 - タブ切り替え時にスクロール位置が引き継がれる。
 
+## 2026-11-12 入力候補
+- 追加: `src/lib/suggest.js`。リストの入力欄で、履歴と別名・まとめを反映した品名を最大6件（`SUGGESTION_LIMIT`）出す。並びはよく買う順、同じ回数なら最近買った順。履歴が0件のときは出さない。
+- 単体テストは 215 件から 220 件。e2e は 45 ステップから 47 ステップ。`npm run build` と `npm run shots`（25〜27）も確認済み。最大件数は `SUGGESTION_LIMIT` の 6 だけ。
+
 ## 再開のしかた
 `npm install` → `npm run check` → `npm run dev`。UI を触ったら `npm run shots` で目視。
 
