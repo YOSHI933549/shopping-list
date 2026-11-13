@@ -42,9 +42,9 @@ function dayHtml(day) {
 
 function emptyHtml(kind) {
   if (kind === 'none') {
-    return `<div class="empty" data-testid="history-empty">${icon('list', 56)}<b>購入履歴はまだありません</b><p>買い物リストで丸を押すと、買った品がここに残ります。<br>レシートを保存した品も入ります。</p></div>`;
+    return `<div class="empty" data-testid="history-empty">${icon('list', 56)}<b>購入履歴はまだありません</b><p>買い物リストで丸を押すと、<br>買った品がここに残ります。<br>レシートを保存した品も入ります。</p></div>`;
   }
-  return `<div class="empty" data-testid="history-filtered-empty"><b>この条件では見つかりません</b><p>お店・期間・品名の条件に合う購入がありません。</p><button type="button" class="btn" data-action="hist-reset" data-testid="history-reset">条件を外す</button></div>`;
+  return `<div class="empty" data-testid="history-filtered-empty"><b>この条件では見つかりません</b><p>お店・期間・品名の条件に合う<br>購入がありません。</p><button type="button" class="btn" data-action="hist-reset" data-testid="history-reset">条件を外す</button></div>`;
 }
 
 function pills(items, current, action, testid) {
