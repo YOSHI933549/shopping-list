@@ -39,8 +39,9 @@ export function historySection(state) {
   const body = n
     ? `<div class="list-in-sheet" data-testid="history-list">${lines.slice().sort(byRecent).map((l) => historyRow(state, l)).join('')}</div>`
     : '<p class="hint">購入履歴はまだありません。</p>';
+  const open = '<button type="button" class="btn" data-action="open-history" data-testid="open-history">購入履歴を見る</button>';
   return `<section class="sec" id="history-sec" data-testid="history-sec"><h2>購入履歴${n ? `<small>${n}件</small>` : ''}</h2>
-<p class="note">1件ずつ消せます。すべて消しても、品名のまとめ（別名・名前の学習）は残ります。</p>
-<div class="btnrow">${wipe}</div>
+<p class="note">日付ごとに見る画面を開けます。消すときは、ここから1件ずつ、またはすべて消せます。すべて消しても、品名のまとめ（別名・名前の学習）は残ります。</p>
+<div class="btnrow">${open}${wipe}</div>
 ${body}</section>`;
 }
