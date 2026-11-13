@@ -412,6 +412,123 @@ scenarios['37-history-one-confirm'] = {
   },
 };
 
+function monthDate(offset, day) {
+  const now = new Date();
+  now.setHours(12, 0, 0, 0);
+  const first = new Date(now.getFullYear(), now.getMonth() + offset, 1);
+  const last = new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate();
+  first.setDate(Math.min(day, last));
+  const p = (n) => String(n).padStart(2, '0');
+  return `${first.getFullYear()}-${p(first.getMonth() + 1)}-${p(first.getDate())}`;
+}
+const d0 = (day) => monthDate(0, day);
+const d1 = (day) => monthDate(-1, day);
+const d2 = (day) => monthDate(-2, day);
+const longName = 'とても長い名前の国産きめ細かな絹ごし豆腐（大容量パック）';
+const purchaseGoods = [
+  { id: 'g1', name: 'ぎゅうにゅう', aliases: [{ storeId: 'aeon', notation: 'ぎゅうにゅう1l' }], mergedInto: 'g2' },
+  { id: 'g2', name: '牛乳', aliases: [{ storeId: 'matsukiyo', notation: 'ぎゅうにゅう' }], mergedInto: null },
+];
+function pLine(id, name, storeId, date, price, extra = {}) {
+  return {
+    id, itemId: null, name, storeId, date, price,
+    boughtAt: extra.boughtAt ?? (date ? `${date}T03:00:00.000Z` : null),
+    memo: '', source: 'check', ...extra,
+  };
+}
+const purchaseLines = [
+  pLine('p1', '牛乳', 'aeon', d0(12), 188, { goodsId: 'g2', boughtAt: `${d0(12)}T02:00:00.000Z` }),
+  pLine('p2', '牛乳', 'matsukiyo', d0(12), 198, { goodsId: 'g2', boughtAt: `${d0(12)}T08:00:00.000Z` }),
+  pLine('p3', '卵', 'aeon', d0(12), 258, { boughtAt: `${d0(12)}T04:00:00.000Z` }),
+  pLine('p4', '卵', 'aeon', d0(12), null, { boughtAt: `${d0(12)}T06:00:00.000Z` }),
+  pLine('p5', longName, 'aeon', d0(11), 12800),
+  pLine('p6', '食パン', 'aeon', d0(10), 138),
+  pLine('p7', '牛肉', 'aeon', d0(8), 580),
+  pLine('p8', 'キャベツ', 'aeon', d0(6), 198),
+  pLine('p9', 'ツナ缶', 'aeon', d0(7), 168),
+  pLine('p10', '柔軟剤', 'matsukiyo', d0(4), 458),
+  pLine('p11', '牛乳', 'aeon', d0(4), null, { goodsId: 'g2' }),
+  pLine('p12', '歯ブラシ', 'amazon', d0(3), 330),
+  pLine('p13', '麦茶', 'aeon', d0(2), null),
+  pLine('p14', '人参', 'aeon', d0(2), null),
+  pLine('p15', '納豆', 'aeon', d0(1), 78),
+  pLine('p16', '牛乳', 'aeon', d1(20), 158, { goodsId: 'g2' }),
+  pLine('p17', '卵', 'aeon', d1(20), 248),
+  pLine('p18', '豚肉', 'aeon', d1(18), 398),
+  pLine('p19', '鮭', 'aeon', d1(15), 498),
+  pLine('p20', '豆腐', 'aeon', d1(12), 88),
+  pLine('p21', 'ヨーグルト', 'matsukiyo', d1(10), 128),
+  pLine('p22', '牛乳', 'amazon', d1(8), 210, { goodsId: 'g2' }),
+  pLine('p23', 'バター', 'amazon', d1(6), 298),
+  pLine('p24', 'ジャム', 'aeon', d1(4), 280),
+  pLine('p25', '醤油', 'aeon', d1(2), 248),
+  pLine('p26', 'ティッシュ', 'matsukiyo', d1(22), 398),
+  pLine('p27', '牛乳', 'aeon', d2(15), 176, { goodsId: 'g2' }),
+  pLine('p28', '冷凍うどん', 'aeon', d2(12), 198),
+  pLine('p29', 'りんご', 'amazon', d2(8), 198),
+  pLine('p30', 'バナナ', 'aeon', d2(5), 128),
+  pLine('p31', 'お茶', 'matsukiyo', d2(3), 98),
+  pLine('p32', '乾電池', 'amazon', d2(1), 330),
+  pLine('p33', '玉ねぎ', 'aeon', null, 100),
+  pLine('p34', '洗剤', 'oldshop', d1(9), 420),
+  pLine('p35', 'ぎゅうにゅう', 'aeon', d0(9), 220, { goodsId: 'g1', notation: 'ぎゅうにゅう1l' }),
+];
+const purchaseMany = mk([], { history: { version: 2, lines: purchaseLines, receipts: [], goods: purchaseGoods } });
+async function openHistory(page) {
+  await page.click('.tab >> text=マイページ');
+  await page.locator('[data-testid="open-history"]').scrollIntoViewIfNeeded();
+  await page.click('[data-testid="open-history"]');
+  await page.waitForSelector('[data-testid="history-summary"]');
+}
+scenarios['38-history-view-empty'] = {
+  data: mk([], { history: { version: 2, lines: [], receipts: [], goods: [] } }),
+  run: openHistory,
+};
+scenarios['39-history-view-one'] = {
+  data: mk([], { history: { version: 2, lines: [pLine('one', '牛乳', 'aeon', d0(3), 198, { goodsId: 'g2' })], receipts: [], goods: purchaseGoods } }),
+  run: openHistory,
+};
+scenarios['40-history-view-many'] = {
+  data: purchaseMany,
+  viewport: { width: 390, height: 5600 },
+  scale: 1,
+  run: openHistory,
+};
+scenarios['41-history-view-filter'] = {
+  data: purchaseMany,
+  run: async (page) => {
+    await openHistory(page);
+    await page.locator('[data-testid="history-period"]').getByRole('button', { name: '先月', exact: true }).click();
+    await page.locator('[data-testid="history-stores"]').getByRole('button', { name: 'イオン', exact: true }).click();
+    await page.waitForFunction(() => document.querySelector('[data-testid="history-condition"]')?.textContent?.includes('先月・イオン'));
+  },
+};
+scenarios['42-history-view-item'] = {
+  data: purchaseMany,
+  run: async (page) => {
+    await openHistory(page);
+    await page.locator('[data-testid="purchase-row"]', { hasText: '牛乳' }).first().click();
+    await page.waitForSelector('[data-testid="purchase-stats"]');
+  },
+};
+scenarios['43-history-view-search'] = {
+  data: purchaseMany,
+  run: async (page) => {
+    await openHistory(page);
+    await page.fill('#history-query', '牛');
+    await page.waitForFunction(() => document.querySelector('[data-testid="history-condition"]')?.textContent?.includes('「牛」'));
+    await page.evaluate(() => { const m = document.querySelector('[data-scroll]'); if (m) m.scrollTop = 0; });
+  },
+};
+scenarios['44-history-view-none'] = {
+  data: purchaseMany,
+  run: async (page) => {
+    await openHistory(page);
+    await page.fill('#history-query', 'ない品');
+    await page.waitForSelector('[data-testid="history-reset"]');
+  },
+};
+
 function assertSuggestCount(page) {
   return page.locator('#suggests .cand').count().then((count) => {
     if (count !== SUGGESTION_LIMIT) throw new Error(`候補は${SUGGESTION_LIMIT}件のはずが ${count}件`);

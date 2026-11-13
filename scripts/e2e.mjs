@@ -403,8 +403,61 @@ try {
   await page.press('#add-input', 'Enter');
   assert.equal(await page.locator('.recent', { hasText: '候補を使わない品' }).count(), 1); ok('候補を押すとまとめ後の名前が入り、使わずに別の品も入れられる');
 
-  // 削除: 品を1件（2回押し・元に戻す）→ チェック済み → リスト全部 → 購入履歴
+  // 購入履歴を見る（削除はマイページの短い一覧のまま）
   await page.click('.sh-head >> text=閉じる');
+  await page.click('.tab >> text=マイページ');
+  await page.locator('[data-testid="open-history"]').scrollIntoViewIfNeeded();
+  await page.click('[data-testid="open-history"]');
+  await page.waitForSelector('[data-testid="purchase-view"]');
+  assert.ok(await page.locator('[data-testid="purchase-day"]').count() >= 1);
+  assert.match(await page.locator('[data-testid="history-summary"]').innerText(), /すべてのお店/);
+  assert.match(await page.locator('[data-testid="history-summary"]').innerText(), /合計/);
+  assert.match(await page.locator('[data-testid="purchase-day"]').first().innerText(), /合計/);
+  assert.equal(await page.locator('[data-testid="purchase-view"] [data-action="delete-history"]').count(), 0);
+  assert.ok(await page.locator('[data-testid="purchase-row"]', { hasText: '牛乳' }).count() >= 1);
+  assert.ok(await page.locator('[data-testid="purchase-row"]', { hasText: '豆腐' }).count() >= 1); ok('購入履歴は日付ごとに開き、削除ボタンは出さない');
+
+  await page.locator('[data-testid="history-stores"]').getByRole('button', { name: 'マツキヨ', exact: true }).click();
+  assert.match(await page.locator('[data-testid="history-condition"]').innerText(), /マツキヨ/);
+  assert.equal(await page.locator('[data-testid="purchase-row"]', { hasText: '豆腐' }).count(), 0);
+  assert.ok(await page.locator('[data-testid="purchase-row"]', { hasText: '柔軟剤' }).count() >= 1); ok('お店で絞ると、その店の品と合計だけになる');
+
+  await page.locator('[data-testid="history-stores"]').getByRole('button', { name: 'すべて', exact: true }).click();
+  await page.fill('#history-query', '卵');
+  assert.equal(await page.locator('[data-testid="purchase-row"]').count(), 2);
+  assert.match(await page.locator('[data-testid="history-condition"]').innerText(), /「卵」/);
+  assert.equal((await page.locator('[data-testid="purchase-prev"]').innerText()).replace(/\s/g, ''), '前回¥258');
+  await page.fill('#history-query', 'ギュウニュウ');
+  assert.ok(await page.locator('[data-testid="purchase-row"]').count() >= 1);
+  const kanaNames = await page.locator('[data-testid="purchase-row"] .hname').allInnerTexts();
+  assert.ok(kanaNames.length >= 1 && kanaNames.every((name) => name.trim() === '牛乳')); ok('品名で絞ると前回の値段が出て、カナのゆれでも当たる');
+
+  await page.fill('#history-query', 'ない品');
+  await page.waitForSelector('[data-testid="history-reset"]');
+  assert.match(await page.locator('[data-testid="history-summary"]').innerText(), /合計 ¥0/);
+  await page.click('[data-testid="history-reset"]');
+  assert.equal(await page.locator('#history-query').inputValue(), '');
+  assert.ok(await page.locator('[data-testid="purchase-row"]', { hasText: '牛乳' }).count() >= 1);
+  await page.locator('[data-testid="history-period"]').getByRole('button', { name: '先月', exact: true }).click();
+  await page.waitForSelector('[data-testid="history-reset"]');
+  assert.match(await page.locator('[data-testid="history-condition"]').innerText(), /^先月/);
+  await page.click('[data-testid="history-reset"]');
+  assert.match(await page.locator('[data-testid="history-condition"]').innerText(), /すべてのお店/); ok('絞って0件のときは条件を外すと戻る');
+
+  await page.locator('[data-testid="purchase-row"]', { hasText: '卵' }).first().click();
+  await page.waitForSelector('[data-testid="purchase-stats"]');
+  assert.equal((await page.locator('[data-testid="purchase-stats"]').innerText()).replace(/\s+/g, ''), '最安¥258（イオン）・平均¥279');
+  assert.equal(await page.locator('[data-testid="purchase-past"]').count(), 2);
+  assert.match(await page.locator('[data-testid="purchase-past"]').first().innerText(), /¥300|¥258/);
+  assert.equal(await page.locator('[data-testid="purchase-item"], [data-testid="purchase-view"]').locator('[data-action="delete-history"]').count(), 0);
+  await page.click('[data-action="close-history"]');
+  assert.equal(await page.locator('#history-query').count(), 1);
+  await page.click('[data-action="close-history"]');
+  assert.ok(await page.locator('[data-testid="history-list"] [data-action="delete-history"]').count() >= 1); ok('品名を開くと最安・平均と過去の値段が出て、マイページの削除は残る');
+
+  await page.click('.tab >> text=買い物リスト');
+
+  // 削除: 品を1件（2回押し・元に戻す）→ チェック済み → リスト全部 → 購入履歴
   const victim = '候補を使わない品';
   const victimRow = () => page.locator('.row', { hasText: victim });
   const delBtn = () => victimRow().locator('[data-action="delete-item"]');
@@ -512,6 +565,16 @@ try {
   assert.deepEqual(stayed.goods, goodsBefore);
   const book2 = await page.evaluate(() => JSON.parse(localStorage.getItem('kaimono-list-v1')).priceBook);
   assert.deepEqual(book2, book); ok('購入履歴をすべて消しても、再読み込み後に別名と値段メモは残る');
+
+  await page.locator('[data-testid="open-history"]').scrollIntoViewIfNeeded();
+  await page.click('[data-testid="open-history"]');
+  const emptyHist = page.locator('[data-testid="history-empty"]');
+  assert.match(await emptyHist.innerText(), /まだありません/);
+  assert.match(await emptyHist.innerText(), /丸を押すと/);
+  assert.equal(await page.locator('[data-testid="history-reset"]').count(), 0);
+  assert.equal(await page.locator('[data-action="delete-history"]').count(), 0);
+  await page.click('[data-action="close-history"]');
+  assert.match(await page.locator('#history-sec').innerText(), /まだありません/); ok('履歴が無い画面は使い方だけを出し、条件を外すは出さない');
 
   assert.deepEqual(errors, [], 'console errors: ' + errors.join('\n'));
   console.log(`E2E OK (${step} steps)`);

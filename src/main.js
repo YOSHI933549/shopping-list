@@ -4,6 +4,7 @@ import * as S from './state/store.js';
 import { renderList } from './ui/list.js';
 import { renderRegular } from './ui/regular.js';
 import { renderMypage } from './ui/mypage.js';
+import { renderPurchases } from './ui/purchase.js';
 import { addSheetHtml, boughtSheetHtml, editSheetHtml, storePills, recentCards, confirmHtml } from './ui/sheets.js';
 import { goodsSheetHtml } from './ui/goods.js';
 import { confirmSheetHtml, pasteSheetHtml, totalsHtml } from './ui/receipt.js';
@@ -20,7 +21,7 @@ import { esc } from './ui/util.js';
 const opened = S.load();
 let state = opened.problem?.scope === 'list' ? opened.state : S.pruneBought(opened.state);
 let loadProblem = opened.problem;
-const ui = { tab: 'list', filter: 'all', sheet: null, sheetStore: null, sheetAdded: [], memoOpen: false, exportText: '', receipt: null, nudge: '', goodsPick: null, armDelete: null, undo: null };
+const ui = { tab: 'list', filter: 'all', sheet: null, sheetStore: null, sheetAdded: [], memoOpen: false, exportText: '', receipt: null, nudge: '', goodsPick: null, armDelete: null, undo: null, purchaseOpen: false, purchaseItem: null, purchasePeriod: 'all', purchaseStore: 'all', purchaseQuery: '' };
 const pending = new Set();
 const speech = speechSupported();
 let stopListen = null;
@@ -73,17 +74,29 @@ function loadNoticeHtml(problem) {
   return `<div class="load-note" role="alert" data-testid="load-note"><p>${text}</p><div class="btnrow">${buttons}</div></div>`;
 }
 
+let purchaseComposing = false;
+
 function render() {
   const sc = view.querySelector('[data-scroll]')?.scrollTop ?? 0;
+  const queryFocused = document.activeElement?.id === 'history-query';
+  const sel = queryFocused ? [document.activeElement.selectionStart, document.activeElement.selectionEnd] : null;
   const boughtCount = S.boughtToday(state).length;
   if (ui.tab === 'list') view.innerHTML = renderList(state, ui, { speech, boughtCount, nudge: ui.nudge }).html;
   else if (ui.tab === 'regular') view.innerHTML = renderRegular(state, ui);
+  else if (ui.purchaseOpen) view.innerHTML = renderPurchases(state, ui);
   else view.innerHTML = renderMypage(state, ui, version);
   const mainEl = view.querySelector('main');
   if (loadProblem && mainEl) mainEl.insertAdjacentHTML('afterbegin', loadNoticeHtml(loadProblem));
   const m = view.querySelector('[data-scroll]');
   if (m) m.scrollTop = sc;
   tabs.innerHTML = TABS.map(([k, ic, label]) => `<button class="tab${ui.tab === k ? ' on' : ''}" data-action="tab" data-id="${k}">${icon(ic, 26)}${label}</button>`).join('');
+  if (queryFocused) {
+    const next = view.querySelector('#history-query');
+    if (next) {
+      next.focus();
+      try { next.setSelectionRange(sel[0], sel[1]); } catch { /* 入力の途中で選択が取れないことがある */ }
+    }
+  }
 }
 
 let toastTimer;
@@ -564,8 +577,48 @@ const actions = {
     showGoods();
     toast('分けました');
   },
+  'open-history': () => {
+    ui.tab = 'mypage';
+    ui.purchaseOpen = true;
+    ui.purchaseItem = null;
+    render();
+  },
+  'close-history': () => {
+    if (ui.purchaseItem) {
+      ui.purchaseItem = null;
+      render();
+      return;
+    }
+    ui.purchaseOpen = false;
+    render();
+  },
+  'hist-period': (id) => {
+    ui.purchasePeriod = id === 'month' || id === 'last' ? id : 'all';
+    render();
+    const main = view.querySelector('[data-scroll]');
+    if (main) main.scrollTop = 0;
+  },
+  'hist-store': (id) => {
+    ui.purchaseStore = id || 'all';
+    render();
+    const main = view.querySelector('[data-scroll]');
+    if (main) main.scrollTop = 0;
+  },
+  'hist-reset': () => {
+    ui.purchasePeriod = 'all';
+    ui.purchaseStore = 'all';
+    ui.purchaseQuery = '';
+    render();
+  },
+  'open-purchase': (id) => {
+    if (!id) return;
+    ui.purchaseItem = id;
+    render();
+  },
   'open-export': () => {
     ui.tab = 'mypage';
+    ui.purchaseOpen = false;
+    ui.purchaseItem = null;
     ui.nudge = '';
     render();
     view.querySelector('#export-sec')?.scrollIntoView({ block: 'start' });
@@ -644,6 +697,15 @@ document.addEventListener('input', (e) => {
     refreshSuggestions();
     return;
   }
+  if (e.target?.id === 'history-query') {
+    ui.purchaseQuery = e.target.value;
+    if (!purchaseComposing) {
+      render();
+      const main = view.querySelector('[data-scroll]');
+      if (main) main.scrollTop = 0;
+    }
+    return;
+  }
   if (ui.sheet !== 'receipt-confirm' || !ui.receipt) return;
   const row = e.target.closest?.('[data-line]');
   if (!row) return;
@@ -663,6 +725,18 @@ document.addEventListener('input', (e) => {
     if (amount && String(amount.value) !== String(line.amount ?? '')) amount.value = line.amount ?? '';
   }
   refreshReceiptTotals();
+});
+
+document.addEventListener('compositionstart', (e) => {
+  if (e.target?.id === 'history-query') purchaseComposing = true;
+});
+document.addEventListener('compositionend', (e) => {
+  if (e.target?.id !== 'history-query') return;
+  purchaseComposing = false;
+  ui.purchaseQuery = e.target.value;
+  render();
+  const main = view.querySelector('[data-scroll]');
+  if (main) main.scrollTop = 0;
 });
 
 document.addEventListener('focusin', (e) => {
