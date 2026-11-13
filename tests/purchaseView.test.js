@@ -177,8 +177,9 @@ describe('購入履歴の画面', () => {
     expect(none).toContain('合計 ¥0');
     expect(none).not.toContain('購入履歴はまだありません');
     const empty = renderPurchases({ ...S.initialState(), history: { version: 2, lines: [], goods: [], receipts: [] } }, {}, now);
+    expect(none).toContain('条件に合う<br>購入がありません。');
     expect(empty).toContain('購入履歴はまだありません');
-    expect(empty).toContain('丸を押すと');
+    expect(empty).toContain('丸を押すと、<br>買った品がここに残ります。');
     expect(empty).not.toContain('history-reset');
   });
 
