@@ -323,6 +323,95 @@ scenarios['27-suggest-max'] = {
   },
 };
 
+const boughtNow = (name, storeId) => ({ ...it(name, storeId), boughtAt: new Date().toISOString(), boughtDate: today() });
+scenarios['28-delete-empty'] = { data: mk([]) };
+scenarios['29-delete-many'] = {
+  data: mk(twenty, { bought: [boughtNow('ヨーグルト', 'aeon'), boughtNow('バター', 'aeon'), boughtNow('ジャム', 'aeon')] }),
+};
+scenarios['30-delete-arm'] = {
+  data: mk(twenty),
+  run: (page) => page.locator('.row').first().locator('[data-action="delete-item"]').click(),
+};
+scenarios['31-delete-undo'] = {
+  data: mk(twenty),
+  run: async (page) => {
+    const btn = page.locator('.row').first().locator('[data-action="delete-item"]');
+    await btn.click();
+    await btn.click();
+    await page.waitForSelector('[data-testid="undo-bar"] button');
+  },
+};
+scenarios['32-delete-clear-confirm'] = {
+  data: mk(twenty),
+  run: async (page) => {
+    await page.click('[data-testid="clear-list"]');
+    await page.waitForSelector('[data-testid="confirm-clear-list"]');
+  },
+};
+scenarios['33-delete-checked-confirm'] = {
+  data: mk(
+    [it('柔軟剤', 'matsukiyo', 'つめかえ用'), it('歯ブラシ', 'matsukiyo')],
+    { bought: ['キャベツ', '人参', '玉ねぎ', '牛乳', '卵', '食パン', '豆腐', '納豆'].map((name) => boughtNow(name, 'aeon')) },
+  ),
+  run: async (page) => {
+    await page.click('[data-testid="clear-checked"]');
+    await page.waitForSelector('[data-testid="confirm-clear-checked"]');
+  },
+};
+
+const historyGoods = [
+  { id: 'g1', name: '牛乳', aliases: [{ storeId: 'aeon', notation: 'ぎゅうにゅう1l' }, { storeId: 'matsukiyo', notation: 'ぎゅうにゅう' }], mergedInto: null },
+];
+const historyNames = [
+  ['牛乳', -1, 198], ['卵', -1, 258], ['食パン', -2, 138],
+  ['とても長い名前の国産きめ細かな絹ごし豆腐（大容量パック）', -3, 12800],
+  ['キャベツ', -4, 198], ['柔軟剤', -5, 458], ['歯ブラシ', -6, 330],
+  ['麦茶', -8, 98], ['ツナ缶', -10, 168], ['納豆', -12, 78], ['醤油', -14, 248], ['冷凍うどん', -20, 198],
+];
+const historyLines = historyNames.map(([name, days, price], index) => ({
+  id: `h${index}`, itemId: null, name, storeId: index === 5 || index === 6 ? 'matsukiyo' : 'aeon',
+  date: isoOff(days), boughtAt: `${isoOff(days)}T03:00:00.000Z`, price, memo: '', source: 'check',
+  goodsId: index === 0 ? 'g1' : null,
+}));
+const historyMany = mk([it('牛乳', 'aeon')], {
+  priceBook: { [priceKey('aeon', '牛乳')]: 198 },
+  history: {
+    version: 2,
+    lines: historyLines,
+    receipts: [{ id: 'r1', storeId: 'aeon', date: isoOff(-1), source: 'receipt', text: '牛乳 198', savedAt: new Date().toISOString() }],
+    goods: historyGoods,
+  },
+});
+scenarios['34-history-empty'] = {
+  data: mk([]),
+  run: async (page) => {
+    await page.click('.tab >> text=マイページ');
+    await page.locator('#history-sec').scrollIntoViewIfNeeded();
+  },
+};
+scenarios['35-history-many'] = {
+  data: historyMany,
+  viewport: { width: 390, height: 3000 },
+  scale: 1,
+  run: (page) => page.click('.tab >> text=マイページ'),
+};
+scenarios['36-history-clear-confirm'] = {
+  data: historyMany,
+  run: async (page) => {
+    await page.click('.tab >> text=マイページ');
+    await page.click('[data-testid="clear-history"]');
+    await page.waitForSelector('[data-testid="confirm-history-all"]');
+  },
+};
+scenarios['37-history-one-confirm'] = {
+  data: historyMany,
+  run: async (page) => {
+    await page.click('.tab >> text=マイページ');
+    await page.locator('[data-action="delete-history"]').first().click();
+    await page.waitForSelector('[data-testid="confirm-history-one"]');
+  },
+};
+
 function assertSuggestCount(page) {
   return page.locator('#suggests .cand').count().then((count) => {
     if (count !== SUGGESTION_LIMIT) throw new Error(`候補は${SUGGESTION_LIMIT}件のはずが ${count}件`);

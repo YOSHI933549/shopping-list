@@ -97,6 +97,50 @@ export function sanitizeGoods(list) {
   });
 }
 
+function uniqStrings(list) {
+  const out = [];
+  const seen = new Set();
+  for (const x of list || []) {
+    if (typeof x !== 'string' || !x || seen.has(x)) continue;
+    seen.add(x);
+    out.push(x);
+  }
+  return out;
+}
+
+/**
+ * ユーザーが消した明細を、bought と priceBook から作り直さないための印。
+ * 品名の台帳（goods・別名）とは別で、履歴を消しても名前の学習は残る。
+ */
+export function cleanSuppress(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const itemIds = uniqStrings(value.itemIds);
+  const prices = uniqStrings(value.prices);
+  if (!itemIds.length && !prices.length) return null;
+  return { itemIds, prices };
+}
+
+function mergeSuppress(a, b) {
+  const left = cleanSuppress(a) || { itemIds: [], prices: [] };
+  const right = cleanSuppress(b) || { itemIds: [], prices: [] };
+  return cleanSuppress({ itemIds: [...left.itemIds, ...right.itemIds], prices: [...left.prices, ...right.prices] });
+}
+
+function withSuppress(history, itemIds, prices) {
+  const suppress = mergeSuppress(history.suppress, { itemIds, prices });
+  const next = { ...history };
+  if (suppress) next.suppress = suppress;
+  else delete next.suppress;
+  return next;
+}
+
+function putSuppress(out, raw) {
+  const suppress = cleanSuppress(raw);
+  if (suppress) out.suppress = suppress;
+  else delete out.suppress;
+  return out;
+}
+
 /** 履歴オブジェクトを整形する。知らない項目は残す。壊れた行も raw として残す。 */
 export function sanitizeHistory(h) {
   if (h == null) return emptyHistory();
@@ -111,7 +155,7 @@ export function sanitizeHistory(h) {
     if (h.lines !== undefined) out.keptLines = h.lines;
     if (keptReceipts !== undefined) out.keptReceipts = keptReceipts;
     if (keptGoods !== undefined) out.keptGoods = keptGoods;
-    return out;
+    return putSuppress(out, h.suppress);
   }
   const lines = [];
   const seen = new Set();
@@ -143,7 +187,7 @@ export function sanitizeHistory(h) {
   if (keptReceipts !== undefined) out.keptReceipts = keptReceipts;
   if (keptGoods !== undefined) out.keptGoods = keptGoods;
   if (out.keptLines === undefined) delete out.keptLines;
-  return out;
+  return putSuppress(out, h.suppress);
 }
 
 function borrowName(state, storeId, norm) {
@@ -190,8 +234,11 @@ export function migratePurchases(state) {
   const lines = [...history.lines];
   const itemIds = new Set(lines.map((l) => l.itemId).filter(Boolean));
 
+  const suppressItems = new Set(history.suppress?.itemIds || []);
+  const suppressPrices = new Set(history.suppress?.prices || []);
+
   for (const b of state.bought || []) {
-    if (!b || typeof b.id !== 'string' || !b.id || itemIds.has(b.id)) continue;
+    if (!b || typeof b.id !== 'string' || !b.id || itemIds.has(b.id) || suppressItems.has(b.id)) continue;
     if (typeof b.name !== 'string' || typeof b.storeId !== 'string') continue;
     // 同じ日・同じお店・同じ品の明細がすでにある（レシートで丸を置き換えたときなど）は足さない。
     const boughtDate = isDate(b.boughtDate) ? b.boughtDate : null;
@@ -202,7 +249,7 @@ export function migratePurchases(state) {
   }
 
   for (const [key, price] of Object.entries(state.priceBook || {})) {
-    if (!Number.isInteger(price) || price < 0) continue;
+    if (!Number.isInteger(price) || price < 0 || suppressPrices.has(key)) continue;
     const i = key.indexOf('\u0000');
     if (i <= 0) continue;
     const storeId = key.slice(0, i);
@@ -261,6 +308,9 @@ export function unionHistory(a, b) {
     goodsMap.set(g.id, goodsMap.has(g.id) ? mergeGood(goodsMap.get(g.id), g) : g);
   }
   const out = { ...left, ...right, version: HISTORY_VERSION, lines: [...map.values()], receipts: [...receiptMap.values()], goods: [...goodsMap.values()] };
+  const suppress = mergeSuppress(left.suppress, right.suppress);
+  if (suppress) out.suppress = suppress;
+  else delete out.suppress;
   if (out.keptLines === undefined) delete out.keptLines;
   return out;
 }
@@ -270,6 +320,33 @@ export function appendPurchase(history, line) {
   const h = sanitizeHistory(history);
   if (line.itemId && h.lines.some((l) => l.itemId === line.itemId)) return h;
   return { ...h, lines: [...h.lines, line] };
+}
+
+/** 明細を1件外す。そのレシートの行が無くなればレシートも外す。品名の台帳は残す。 */
+export function removeHistoryLine(history, id, extra = {}) {
+  const h = sanitizeHistory(history);
+  const line = h.lines.find((l) => l.id === id);
+  if (!line) return h;
+  const lines = h.lines.filter((l) => l.id !== id);
+  let receipts = h.receipts;
+  if (typeof line.receiptId === 'string' && line.receiptId && !lines.some((l) => l.receiptId === line.receiptId)) {
+    receipts = receipts.filter((r) => r.id !== line.receiptId);
+  }
+  const itemIds = [
+    ...(typeof line.itemId === 'string' && line.itemId ? [line.itemId] : []),
+    ...(extra.itemIds || []),
+  ];
+  return withSuppress({ ...h, lines, receipts }, itemIds, extra.prices || []);
+}
+
+/** 明細とレシートを空にする。品名の台帳（別名・まとめ）は残す。 */
+export function clearHistoryRecords(history, extra = {}) {
+  const h = sanitizeHistory(history);
+  const itemIds = [
+    ...h.lines.map((l) => (typeof l.itemId === 'string' ? l.itemId : '')),
+    ...(extra.itemIds || []),
+  ];
+  return withSuppress({ ...h, lines: [], receipts: [] }, itemIds, extra.prices || []);
 }
 
 /** 戻した品の明細を外す。removed が false のときは値段メモを触らない。 */

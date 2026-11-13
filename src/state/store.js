@@ -5,7 +5,7 @@ import { stripSensitiveLines } from '../lib/receipt.js';
 import { readYen } from '../lib/receiptDraft.js';
 import {
   HISTORY_KEY, HISTORY_VERSION, emptyHistory, copyPlain, sanitizeHistory, migratePurchases, unionHistory,
-  appendPurchase, dropPurchase, priceFromLines, isDate,
+  appendPurchase, dropPurchase, priceFromLines, isDate, removeHistoryLine, clearHistoryRecords,
 } from '../lib/history.js';
 
 // 状態の純粋な操作 + localStorage への保存。操作関数は新しい state を返す（元は変更しない）。
@@ -61,6 +61,21 @@ export function addItem(state, { name, storeId, memo = '', price = null }, now =
 
 export function removeItem(state, id) {
   return { ...state, items: state.items.filter((i) => i.id !== id) };
+}
+
+/** 消した品を、元の位置へ戻す。同じ id が既にあれば何もしない。 */
+export function insertItem(state, item, index) {
+  if (!item || typeof item.id !== 'string' || state.items.some((i) => i.id === item.id)) return state;
+  const items = state.items.slice();
+  const at = Number.isInteger(index) ? Math.max(0, Math.min(index, items.length)) : items.length;
+  items.splice(at, 0, item);
+  return { ...state, items };
+}
+
+/** 買い物リストの品をすべて外す。チェック済み・履歴・定期購入品は残す。 */
+export function clearItems(state) {
+  if (!state.items.length) return state;
+  return { ...state, items: [] };
 }
 
 /** チェック → 買い物リストから「今日買ったもの」へ。明細にも1件残す（30日では消えない）。 */
@@ -126,6 +141,55 @@ export function undoBought(state, id) {
 export function boughtToday(state, now = new Date()) {
   const today = localDate(now);
   return state.bought.filter((b) => b.boughtDate === today);
+}
+
+/** 今日チェックした品を「今日買ったもの」から外す。購入履歴と値段メモは残す。 */
+export function clearBoughtToday(state, now = new Date()) {
+  const today = localDate(now);
+  const bought = state.bought.filter((b) => b.boughtDate !== today);
+  if (bought.length === state.bought.length) return state;
+  return { ...state, bought };
+}
+
+function boughtIdsCoveredBy(state, line) {
+  if (!line || !isDate(line.date) || typeof line.storeId !== 'string' || typeof line.name !== 'string') return [];
+  const norm = normalize(line.name);
+  return (state.bought || [])
+    .filter((b) => b && typeof b.id === 'string' && b.storeId === line.storeId && b.boughtDate === line.date && normalize(b.name) === norm)
+    .map((b) => b.id);
+}
+
+function priceKeysToSuppress(lines, priceBook, storeId, name) {
+  if (typeof storeId !== 'string' || typeof name !== 'string') return [];
+  const key = priceKey(storeId, name);
+  const price = priceBook?.[key];
+  if (!Number.isInteger(price) || price < 0) return [];
+  const norm = normalize(name);
+  const remains = (lines || []).some((l) => l && l.storeId === storeId && normalize(l.name) === norm && l.price === price);
+  return remains ? [] : [key];
+}
+
+/** 購入履歴を1件消す。品名のまとめ（別名）と値段メモは残す。 */
+export function removePurchase(state, lineId) {
+  const ready = migratePurchases(state);
+  const line = ready.history.lines.find((l) => l.id === lineId);
+  if (!line) return ready;
+  const linesAfter = ready.history.lines.filter((l) => l.id !== lineId);
+  const history = removeHistoryLine(ready.history, lineId, {
+    itemIds: boughtIdsCoveredBy(ready, line),
+    prices: priceKeysToSuppress(linesAfter, ready.priceBook, line.storeId, line.name),
+  });
+  return { ...ready, history };
+}
+
+/** 購入履歴をすべて消す。品名のまとめ（別名・名前の学習）と値段メモは残す。 */
+export function clearPurchases(state) {
+  const ready = migratePurchases(state);
+  const itemIds = (ready.bought || []).map((b) => b && b.id).filter((id) => typeof id === 'string' && id);
+  const prices = Object.entries(ready.priceBook || {})
+    .filter(([, v]) => Number.isInteger(v) && v >= 0)
+    .map(([k]) => k);
+  return { ...ready, history: clearHistoryRecords(ready.history, { itemIds, prices }) };
 }
 
 /** 古い購入履歴を捨てる（今日以外を残したいなら keepDays を使う）。 */

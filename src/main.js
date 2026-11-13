@@ -4,7 +4,7 @@ import * as S from './state/store.js';
 import { renderList } from './ui/list.js';
 import { renderRegular } from './ui/regular.js';
 import { renderMypage } from './ui/mypage.js';
-import { addSheetHtml, boughtSheetHtml, editSheetHtml, storePills, recentCards } from './ui/sheets.js';
+import { addSheetHtml, boughtSheetHtml, editSheetHtml, storePills, recentCards, confirmHtml } from './ui/sheets.js';
 import { goodsSheetHtml } from './ui/goods.js';
 import { confirmSheetHtml, pasteSheetHtml, totalsHtml } from './ui/receipt.js';
 import { scanStatusHtml } from './ui/receiptScan.js';
@@ -20,7 +20,7 @@ import { esc } from './ui/util.js';
 const opened = S.load();
 let state = opened.problem?.scope === 'list' ? opened.state : S.pruneBought(opened.state);
 let loadProblem = opened.problem;
-const ui = { tab: 'list', filter: 'all', sheet: null, sheetStore: null, sheetAdded: [], memoOpen: false, exportText: '', receipt: null, nudge: '', goodsPick: null };
+const ui = { tab: 'list', filter: 'all', sheet: null, sheetStore: null, sheetAdded: [], memoOpen: false, exportText: '', receipt: null, nudge: '', goodsPick: null, armDelete: null, undo: null };
 const pending = new Set();
 const speech = speechSupported();
 let stopListen = null;
@@ -33,6 +33,18 @@ const tabs = app.querySelector('.tabs');
 const overlay = document.createElement('div');
 overlay.id = 'overlay';
 document.body.appendChild(overlay);
+const confirmHost = document.createElement('div');
+confirmHost.id = 'confirm';
+document.body.appendChild(confirmHost);
+const undoHost = document.createElement('div');
+undoHost.id = 'undo-bar';
+undoHost.className = 'undo-bar';
+undoHost.setAttribute('data-testid', 'undo-bar');
+undoHost.hidden = true;
+document.body.appendChild(undoHost);
+const UNDO_MS = 5000;
+let confirmAction = null;
+let undoTimer = null;
 
 const TABS = [['regular', 'repeat', '定期購入品'], ['list', 'list', '買い物リスト'], ['mypage', 'person', 'マイページ']];
 
@@ -75,6 +87,35 @@ function render() {
 }
 
 let toastTimer;
+function paintUndo() {
+  if (!ui.undo) {
+    undoHost.hidden = true;
+    undoHost.innerHTML = '';
+    return;
+  }
+  undoHost.hidden = false;
+  undoHost.innerHTML = `<span>「${esc(ui.undo.item.name)}」を消しました</span><button type="button" data-action="undo-delete">元に戻す</button>`;
+}
+function dismissUndo() {
+  ui.undo = null;
+  clearTimeout(undoTimer);
+  paintUndo();
+}
+function showUndo(item, index) {
+  ui.undo = { item, index };
+  paintUndo();
+  clearTimeout(undoTimer);
+  undoTimer = setTimeout(dismissUndo, UNDO_MS);
+}
+function closeConfirm() {
+  confirmAction = null;
+  confirmHost.innerHTML = '';
+}
+function openConfirm({ title, body, okLabel, danger = false, testid, run }) {
+  confirmAction = run;
+  confirmHost.innerHTML = confirmHtml({ title, body, okLabel, danger, testid });
+  confirmHost.querySelector('button[data-action="confirm-cancel"]')?.focus();
+}
 function toast(msg) {
   document.querySelector('.toast')?.remove();
   const el = document.createElement('div');
@@ -381,6 +422,85 @@ const actions = {
   filter: (id) => { ui.filter = id; render(); },
   aisle: () => commit(S.setSetting(state, 'aisleOrder', !state.settings.aisleOrder)),
   check: checkRow,
+  'delete-item': (id) => {
+    if (listBlocked()) return;
+    if (ui.armDelete !== id) {
+      ui.armDelete = id;
+      render();
+      return;
+    }
+    const index = state.items.findIndex((i) => i.id === id);
+    ui.armDelete = null;
+    if (index < 0) { render(); return; }
+    const item = state.items[index];
+    commit(S.removeItem(state, id));
+    showUndo(item, index);
+  },
+  'undo-delete': () => {
+    if (!ui.undo) return;
+    const { item, index } = ui.undo;
+    dismissUndo();
+    commit(S.insertItem(state, item, index));
+  },
+  'ask-clear-checked': () => {
+    const items = S.boughtToday(state);
+    if (!items.length) return;
+    openConfirm({
+      title: 'チェック済みを削除',
+      body: `今日チェックした ${items.length}件を消します。リストには戻りません。購入履歴は残ります。`,
+      okLabel: `${items.length}件を削除`,
+      testid: 'confirm-clear-checked',
+      run: () => {
+        commit(S.clearBoughtToday(state));
+        if (ui.sheet === 'bought') closeSheet();
+      },
+    });
+  },
+  'ask-clear-list': () => {
+    const n = state.items.length;
+    if (!n) return;
+    openConfirm({
+      title: 'リストを空にしますか',
+      body: `リストの ${n}件をすべて消します。チェック済み・購入履歴・品名のまとめは残ります。`,
+      okLabel: `${n}件を消す`,
+      testid: 'confirm-clear-list',
+      run: () => {
+        dismissUndo();
+        ui.armDelete = null;
+        commit(S.clearItems(state));
+      },
+    });
+  },
+  'delete-history': (id) => {
+    const line = (state.history?.lines || []).find((l) => l.id === id);
+    if (!line) return;
+    const name = line.name || '（名前なし）';
+    openConfirm({
+      title: 'この購入履歴を消しますか',
+      body: `「${name}」の1件を消します。品名のまとめは残ります。`,
+      okLabel: 'この1件を削除',
+      testid: 'confirm-history-one',
+      run: () => commit(S.removePurchase(state, id)),
+    });
+  },
+  'ask-clear-history': () => {
+    const n = state.history?.lines?.length || 0;
+    if (!n) return;
+    openConfirm({
+      title: '購入履歴をすべて消しますか',
+      body: `購入履歴 ${n}件を消します。元に戻せません。品名のまとめ（別名・名前の学習）は残ります。`,
+      okLabel: `${n}件を削除`,
+      danger: true,
+      testid: 'confirm-history-all',
+      run: () => commit(S.clearPurchases(state)),
+    });
+  },
+  'confirm-cancel': () => closeConfirm(),
+  'confirm-ok': () => {
+    const run = confirmAction;
+    closeConfirm();
+    run?.();
+  },
   'open-add': openAddSheet,
   'open-receipt': openReceiptPaste,
   'receipt-read': readReceiptText,
@@ -510,6 +630,10 @@ const actions = {
 
 document.addEventListener('click', (e) => {
   const el = e.target.closest('[data-action]');
+  if (ui.armDelete && el?.dataset.action !== 'delete-item') {
+    ui.armDelete = null;
+    render();
+  }
   if (!el) return;
   const fn = actions[el.dataset.action];
   if (fn) fn(el.dataset.id, el);
@@ -563,6 +687,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.isComposing && e.target.matches('#add-input, #memo-input, #price-input')) { e.preventDefault(); addFromSheet(); }
   if (e.key === 'Enter' && !e.isComposing && e.target.classList?.contains('rname')) e.preventDefault();
   if (e.key === 'Enter' && !e.isComposing && e.target.id === 'edit-price') { e.preventDefault(); saveEdit(overlay.querySelector('[data-action="save-edit"]').dataset.id); }
+  if (e.key === 'Escape' && confirmAction) { closeConfirm(); return; }
   if (e.key === 'Escape' && ui.sheet) closeSheet();
 });
 
