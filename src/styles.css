@@ -181,3 +181,17 @@ textarea.field{width:100%;min-height:96px;font-size:12px;font-family:ui-monospac
 .scan-again,.scan-paste{min-height:44px;border-radius:12px;padding:8px 12px;text-align:center;font-size:15px;background:#fffdf8}
 .scan-again{border:1.5px dashed var(--ink);font-weight:600}
 .scan-paste{border:1.5px solid var(--ink)}
+.list-acts{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.row-del{flex:none;font-size:12px;line-height:1.2;color:var(--ink2);border:1px solid var(--ink2);border-radius:10px;padding:4px 8px;background:#fffdf8}
+.row-del.arm{color:#fff;background:#8f2d2d;border-color:#8f2d2d;font-weight:600}
+.undo-bar{position:fixed;z-index:19;left:16px;right:16px;bottom:calc(var(--tabh) + var(--sab) + 84px);display:flex;align-items:center;gap:10px;background:var(--ink);color:var(--paper);padding:8px 8px 8px 14px;border-radius:14px 11px 13px 12px;font-size:14px;line-height:1.4;box-shadow:2px 3px 0 rgba(43,39,36,.2)}
+.undo-bar[hidden]{display:none}
+.undo-bar span{flex:1;min-width:0;overflow-wrap:anywhere}
+.undo-bar button{flex:none;color:var(--paper);border:1.5px solid var(--paper);border-radius:10px;padding:4px 10px;font-size:13px;background:transparent}
+#confirm .dim{z-index:40}
+#confirm .sheet{z-index:41}
+.confirm-body{margin-top:12px;font-size:15px;line-height:1.7;overflow-wrap:anywhere}
+.sheet.confirm h2{font-size:18px;line-height:1.4;overflow-wrap:anywhere}
+.sheet.confirm .acts .btn{flex:1;text-align:center;white-space:normal}
+.sheet.confirm.is-danger{border-top:2px solid #8f2d2d}
+.btn.danger{background:#8f2d2d;border-color:#6e2222;color:#fff;font-weight:600;white-space:normal}
