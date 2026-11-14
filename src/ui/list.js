@@ -58,7 +58,7 @@ function listActions(itemCount, boughtCount) {
   return `<div class="list-acts">${checked}<button type="button" class="btn sm" data-action="ask-clear-list" data-testid="clear-list"${itemCount ? '' : ' disabled'}>リストを空にする</button></div>`;
 }
 
-export function renderList(state, ui, { speech, boughtCount, now = new Date(), nudge = '' }) {
+export function renderList(state, ui, { speech, boughtCount, now = new Date(), nudge = '', nudgeAction = 'open-export' }) {
   const stores = storesWithItems(state);
   const filter = stores.some((s) => s.id === ui.filter) ? ui.filter : 'all';
   const aisle = !!state.settings.aisleOrder;
@@ -73,7 +73,7 @@ export function renderList(state, ui, { speech, boughtCount, now = new Date(), n
     return `<section class="card" data-store="${esc(store.id)}"><div class="store">${esc(store.name)}<small>${items.length}品</small></div>${body}</section>`;
   }).join('');
   const empty = `<div class="empty">${icon('list', 56)}<b>リストは空っぽです</b><p>右下の赤いペンのボタンを押して、<br>買いたいものを書き足してみよう。</p></div>`;
-  const nudgeHtml = nudge ? `<p class="nudge" data-testid="export-nudge">${esc(nudge)} <button type="button" class="nudge-go" data-action="open-export">書き出し</button></p>` : '';
+  const nudgeHtml = nudge ? `<p class="nudge" data-testid="export-nudge">${esc(nudge)} <button type="button" class="nudge-go" data-action="${esc(nudgeAction)}">書き出し</button></p>` : '';
   return { filter, html: `
 <header><h1>買い物リスト</h1>
 <div class="toolbar"><div class="pills" data-testid="pills">${pills}</div>

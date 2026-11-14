@@ -181,6 +181,9 @@ textarea.field{width:100%;min-height:96px;font-size:12px;font-family:ui-monospac
 .scan-again,.scan-paste{min-height:44px;border-radius:12px;padding:8px 12px;text-align:center;font-size:15px;background:#fffdf8}
 .scan-again{border:1.5px dashed var(--ink);font-weight:600}
 .scan-paste{border:1.5px solid var(--ink)}
+.import-preview{margin-top:8px;padding:10px 12px;border:1.5px dashed var(--ink);border-radius:12px 10px 13px 11px;background:rgba(255,253,248,.95);font-size:13px;line-height:1.6;overflow-wrap:anywhere}
+.import-preview p{margin:0 0 6px}
+.nudge{overflow-wrap:anywhere}
 .list-acts{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
 .row-del{flex:none;font-size:12px;line-height:1.2;color:var(--ink2);border:1px solid var(--ink2);border-radius:10px;padding:4px 8px;background:#fffdf8}
 .row-del.arm{color:#fff;background:#8f2d2d;border-color:#8f2d2d;font-weight:600}

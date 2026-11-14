@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { build, serve, launch, root } from './lib.mjs';
 import { countMatchingLines } from '../src/lib/receiptScan.js';
+import { historyBackupJSON, parseHistoryBackup } from '../src/lib/historyBackup.js';
 
 build();
 const { server, url } = await serve();
@@ -454,6 +455,51 @@ try {
   assert.equal(await page.locator('#history-query').count(), 1);
   await page.click('[data-action="close-history"]');
   assert.ok(await page.locator('[data-testid="history-list"] [data-action="delete-history"]').count() >= 1); ok('品名を開くと最安・平均と過去の値段が出て、マイページの削除は残る');
+
+
+  // 購入履歴: 書き出し、件数の確認、同じ id は足さない、壊れたファイルは断る
+  const beforeHist = await readHist();
+  const backupText = historyBackupJSON({
+    ...beforeHist,
+    lines: [
+      ...beforeHist.lines,
+      { ...beforeHist.lines[0], id: beforeHist.lines[0].id, name: '別名で上書きしない' },
+      { id: 'e2e-extra', name: '作り物の品', storeId: 'aeon', date: '2026-11-01', price: 100, source: 'check', memo: '' },
+    ],
+  }, '2026-11-12T00:00:00.000Z');
+  await page.click('.tab >> text=マイページ');
+  const [download] = await Promise.all([
+    page.waitForEvent('download'),
+    page.click('[data-action="history-export"]'),
+  ]);
+  assert.match(download.suggestedFilename(), /^kaimono-history-\d{4}-\d{2}-\d{2}\.json$/);
+  const downloaded = parseHistoryBackup(fs.readFileSync(await download.path(), 'utf8'));
+  assert.equal(downloaded.ok, true);
+  assert.equal(downloaded.history.lines.length, beforeHist.lines.length);
+  assert.equal(downloaded.history.goods.length, beforeHist.goods.length); ok('履歴の書き出しは日付付きのファイルで、明細と別名が入る');
+
+  await page.locator('#history-import-text').fill(backupText);
+  await page.click('[data-action="history-import-preview"]');
+  const previewText = await page.locator('[data-testid="history-import-preview"]').innerText();
+  assert.match(previewText, /新しく足す 1件/);
+  assert.match(previewText, /同じ記録/);
+  await page.click('[data-action="history-import-apply"]');
+  const merged = await readHist();
+  assert.equal(merged.lines.length, beforeHist.lines.length + 1);
+  assert.equal(merged.lines.filter((l) => l.id === beforeHist.lines[0].id).length, 1);
+  assert.equal(merged.lines.filter((l) => l.id === 'e2e-extra').length, 1);
+  const listAfter = await page.evaluate(() => JSON.parse(localStorage.getItem('kaimono-list-v1')));
+  assert.ok(listAfter.items.some((item) => item.name === '食パン')); ok('確認した件数だけ履歴を足し、同じ記録とリストは残る');
+
+  await page.locator('.toast').waitFor({ state: 'detached' });
+  await page.locator('#history-import-file').setInputFiles({
+    name: 'broken.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from('{oops'),
+  });
+  await page.locator('.toast').waitFor();
+  assert.match(await page.locator('.toast').innerText(), /JSON として読めませんでした/);
+  assert.equal((await readHist()).lines.length, merged.lines.length); ok('壊れた履歴ファイルは理由を出して断り、記録は増えない');
 
   await page.click('.tab >> text=買い物リスト');
 

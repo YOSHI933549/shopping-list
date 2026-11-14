@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { priceKey } from '../src/lib/price.js';
+import { BACKUP_NUDGE_MIN_RECORDS, historyBackupJSON } from '../src/lib/historyBackup.js';
 import { SUGGESTION_LIMIT } from '../src/lib/suggest.js';
 import { build, serve, launch, root } from './lib.mjs';
 
@@ -250,6 +251,16 @@ const goodsMax = (() => {
   }
   return { version: 2, lines, receipts: [], goods };
 })();
+async function scrollSection(page, id) {
+  await page.evaluate((sectionId) => {
+    const sec = document.getElementById(sectionId);
+    const main = sec?.closest('main');
+    if (!sec || !main) return;
+    const top = sec.getBoundingClientRect().top - main.getBoundingClientRect().top + main.scrollTop;
+    main.scrollTop = top;
+  }, id);
+}
+
 async function openGoods(page) {
   await page.click('.tab >> text=マイページ');
   await page.click('[data-action="open-goods"]');
@@ -264,6 +275,77 @@ scenarios['24-goods-max'] = {
   viewport: { width: 390, height: 6400 },
   scale: 1,
   run: openGoods,
+};
+
+const keptLine = {
+  id: 'h1', name: '牛乳', storeId: 'aeon', date: '2026-11-01', price: 198, source: 'check', memo: '', itemId: null,
+};
+const importFile = historyBackupJSON({
+  version: 2,
+  lines: [
+    keptLine,
+    {
+      id: 'h2', name: 'とても長い名前の国産きめ細かな絹ごし豆腐（大容量パック）', storeId: 'aeon',
+      date: '2026-11-02', price: 248, source: 'receipt', memo: '',
+    },
+  ],
+  receipts: [{ id: 'r1', storeId: 'aeon', date: '2026-11-02', total: 446, tax: '税込', source: 'receipt', text: '', savedAt: '2026-11-02T00:00:00.000Z' }],
+  goods: [{
+    id: 'g1', name: '牛乳',
+    aliases: [{ storeId: 'aeon', notation: 'ぎゅうにゅう1l' }, { storeId: 'matsukiyo', notation: 'ながいひょうきのれしーとしょうひん' }],
+    mergedInto: null,
+  }],
+}, '2026-11-12T00:00:00.000Z');
+scenarios['25-history-export'] = {
+  data: mk([it('牛乳', 'aeon')], { history: { version: 2, lines: [keptLine], receipts: [], goods: [] } }),
+  run: async (page) => {
+    await page.click('.tab >> text=マイページ');
+    await scrollSection(page, 'history-export-sec');
+  },
+};
+scenarios['26-history-import'] = {
+  data: mk([it('牛乳', 'aeon')], {
+    history: {
+      version: 2,
+      lines: [keptLine],
+      receipts: [],
+      goods: [{ id: 'g1', name: '牛乳', aliases: [{ storeId: 'aeon', notation: 'ぎゅうにゅう1l' }], mergedInto: null }],
+    },
+  }),
+  run: async (page) => {
+    await page.click('.tab >> text=マイページ');
+    await page.locator('#history-import-text').fill(importFile);
+    await page.click('[data-action="history-import-preview"]');
+    await scrollSection(page, 'history-import-sec');
+  },
+};
+scenarios['27-backup-nudge'] = {
+  data: mk([
+    it('牛乳', 'aeon'),
+    it('卵', 'aeon', 'Mサイズ'),
+    it('とても長い名前のおいしいプレミアム国産きめ細かな絹ごし豆腐（大容量パック）', 'aeon', '冷蔵コーナーの奥'),
+  ], {
+    settings: {
+      aisleOrder: false,
+      lastStoreId: 'aeon',
+      lastExportDate: isoOff(-31),
+      lastExportAt: `${isoOff(-31)}T00:00:00.000Z`,
+    },
+    history: {
+      version: 2,
+      receipts: [],
+      goods: [],
+      lines: Array.from({ length: BACKUP_NUDGE_MIN_RECORDS }, (_, i) => ({
+        id: `n${i}`,
+        name: i === 0 ? '牛乳' : `記録${i}`,
+        storeId: 'aeon',
+        date: isoOff(-40),
+        price: 100 + i,
+        source: 'check',
+        memo: '',
+      })),
+    },
+  }),
 };
 
 scenarios['25-suggest-zero'] = {
