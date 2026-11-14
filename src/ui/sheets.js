@@ -23,19 +23,33 @@ export function addSheetHtml(state, sel, speech) {
 <div class="label">どのお店で買う？</div>
 <div class="spills" data-testid="store-pills">${storePills(state, sel)}</div>
 <div class="input"><input id="add-input" type="text" enterkeyhint="done" autocomplete="off" autocapitalize="off" placeholder="${esc(storeName(state, sel))}に入れる品">${speech ? `<button class="mic" data-action="mic" aria-label="話して追加">${icon('mic', 24)}</button>` : ''}</div>
+<div class="suggests hidden" id="suggests" data-testid="suggests"></div>
 <div class="input memo hidden" id="memo-wrap"><input id="memo-input" type="text" autocomplete="off" placeholder="メモ（次に入れる品につきます）"></div>
 <div class="input price"><span class="yen">値段（円）</span><input id="price-input" type="text" inputmode="numeric" enterkeyhint="done" autocomplete="off" placeholder="任意"></div>
 <div class="acts"><button class="memo-b" data-action="toggle-memo">＋メモ</button><button class="add-b" data-action="add">追加</button></div></div>`;
 }
 
 export function boughtSheetHtml(state, items) {
+  const wipe = items.length
+    ? `<div class="btnrow"><button type="button" class="btn sm" data-action="ask-clear-checked">チェック済み ${items.length}件を削除</button></div>`
+    : '';
   const body = items.length
     ? `<div class="list-in-sheet">${items.map((b) => `<div class="brow">${itemIcon(b.name)}<div class="nm">${esc(b.name)}<small>${esc(storeName(state, b.storeId))}${b.memo ? '・' + esc(b.memo) : ''}${Number.isInteger(b.price) ? '・' + formatYen(b.price) : ''}</small></div><button class="btn sm" data-action="undo-bought" data-id="${esc(b.id)}">戻す</button></div>`).join('')}</div>`
     : '<div class="hint">今日買ったものはまだありません</div>';
   return `<div class="dim" data-action="close-sheet"></div>
 <div class="sheet" role="dialog" aria-label="今日買ったもの"><div class="grab"></div>
 <div class="sh-head"><h2>今日買ったもの</h2><button class="btn-ghost" data-action="close-sheet">閉じる</button></div>
-<div class="count"><b>${items.length}件</b> 買いました</div>${body}</div>`;
+<div class="count"><b>${items.length}件</b> 買いました</div>${wipe}${body}</div>`;
+}
+
+export function confirmHtml({ title, body, okLabel, danger = false, testid = 'confirm' }) {
+  const sheetClass = danger ? 'sheet confirm is-danger' : 'sheet confirm';
+  const okClass = danger ? 'btn danger' : 'btn red';
+  return `<div class="dim" data-action="confirm-cancel"></div>
+<div class="${sheetClass}" role="dialog" aria-modal="true" aria-label="${esc(title)}" data-testid="${esc(testid)}"><div class="grab"></div>
+<div class="sh-head"><h2>${esc(title)}</h2></div>
+<p class="confirm-body">${esc(body)}</p>
+<div class="acts"><button type="button" class="btn" data-action="confirm-cancel">キャンセル</button><button type="button" class="${okClass}" data-action="confirm-ok">${esc(okLabel)}</button></div></div>`;
 }
 
 export function editSheetHtml(state, item) {

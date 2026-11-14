@@ -43,10 +43,19 @@ function lastBoughtLine(state, it, now) {
   return label ? `<span class="last">${esc(label)}</span>` : '';
 }
 
-function row(state, it, now) {
+function row(state, it, now, armId) {
   const memo = it.memo ? `<span class="memo">メモ：${esc(it.memo)}</span>` : '';
+  const armed = armId === it.id;
+  const del = `<button type="button" class="row-del${armed ? ' arm' : ''}" data-action="delete-item" data-id="${esc(it.id)}" aria-label="${esc(it.name)}を${armed ? '消しますか' : '消す'}">${armed ? '消す？' : '消す'}</button>`;
   return `<div class="row" data-row="${esc(it.id)}">${itemIcon(it.name)}<div class="nm" data-action="edit-item" data-id="${esc(it.id)}">${esc(it.name)}${memo}${priceLine(state, it)}${lastBoughtLine(state, it, now)}</div>` +
-    `<button class="ck" data-action="check" data-id="${esc(it.id)}" aria-label="${esc(it.name)}を買った"></button></div>`;
+    `${del}<button class="ck" data-action="check" data-id="${esc(it.id)}" aria-label="${esc(it.name)}を買った"></button></div>`;
+}
+
+function listActions(itemCount, boughtCount) {
+  const checked = boughtCount > 0
+    ? `<button type="button" class="btn sm" data-action="ask-clear-checked" data-testid="clear-checked">チェック済み ${boughtCount}件を削除</button>`
+    : '';
+  return `<div class="list-acts">${checked}<button type="button" class="btn sm" data-action="ask-clear-list" data-testid="clear-list"${itemCount ? '' : ' disabled'}>リストを空にする</button></div>`;
 }
 
 export function renderList(state, ui, { speech, boughtCount, now = new Date(), nudge = '', nudgeAction = 'open-export' }) {
@@ -56,10 +65,11 @@ export function renderList(state, ui, { speech, boughtCount, now = new Date(), n
   const pills = [{ id: 'all', name: 'すべて' }, ...stores]
     .map((s) => `<button class="pill${s.id === filter ? ' on' : ''}" data-action="filter" data-id="${esc(s.id)}">${esc(s.name)}</button>`).join('');
   const groups = groupByStore(state, filter);
+  const arm = ui.armDelete || null;
   const cards = groups.map(({ store, items }) => {
     const body = aisle
-      ? groupByAisle(items).map((g) => `<div class="aisle">${esc(g.aisle)}</div>${g.items.map((it) => row(state, it, now)).join('')}`).join('')
-      : items.map((it) => row(state, it, now)).join('');
+      ? groupByAisle(items).map((g) => `<div class="aisle">${esc(g.aisle)}</div>${g.items.map((it) => row(state, it, now, arm)).join('')}`).join('')
+      : items.map((it) => row(state, it, now, arm)).join('');
     return `<section class="card" data-store="${esc(store.id)}"><div class="store">${esc(store.name)}<small>${items.length}品</small></div>${body}</section>`;
   }).join('');
   const empty = `<div class="empty">${icon('list', 56)}<b>リストは空っぽです</b><p>右下の赤いペンのボタンを押して、<br>買いたいものを書き足してみよう。</p></div>`;
@@ -68,7 +78,8 @@ export function renderList(state, ui, { speech, boughtCount, now = new Date(), n
 <header><h1>買い物リスト</h1>
 <div class="toolbar"><div class="pills" data-testid="pills">${pills}</div>
 <button class="toggle" data-action="aisle" role="switch" aria-checked="${aisle}">売り場順<span class="sw${aisle ? ' on' : ''}"></span></button></div>
-<button type="button" class="receipt-open" data-action="open-receipt">レシートを読む</button></header>
+<button type="button" class="receipt-open" data-action="open-receipt">レシートを読む</button>
+${listActions(state.items.length, boughtCount)}</header>
 <main data-scroll>${nudgeHtml}${cards || empty}</main>${dock(state, speech, boughtCount)}` };
 }
 

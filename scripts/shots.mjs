@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { priceKey } from '../src/lib/price.js';
 import { BACKUP_NUDGE_MIN_RECORDS, historyBackupJSON } from '../src/lib/historyBackup.js';
+import { SUGGESTION_LIMIT } from '../src/lib/suggest.js';
 import { build, serve, launch, root } from './lib.mjs';
 
 build();
@@ -346,6 +347,275 @@ scenarios['27-backup-nudge'] = {
     },
   }),
 };
+
+scenarios['25-suggest-zero'] = {
+  data: mk([]),
+  run: async (page) => {
+    await page.click('[data-action="open-add"]');
+    await page.fill('#add-input', '牛乳');
+  },
+};
+scenarios['26-suggest-one'] = {
+  data: mk([], {
+    history: {
+      version: 2,
+      lines: [{
+        id: 'l1', goodsId: 'g1', name: 'ぎゅうにゅう', storeId: 'aeon', date: isoOff(-3),
+        price: 198, source: 'receipt', memo: '', notation: 'ぎゅうにゅう1l',
+      }],
+      receipts: [],
+      goods: [
+        { id: 'g1', name: 'ぎゅうにゅう', aliases: [{ storeId: 'aeon', notation: 'ぎゅうにゅう1l' }], mergedInto: 'g2' },
+        { id: 'g2', name: '牛乳', aliases: [{ storeId: 'matsukiyo', notation: 'ぎゅうにゅう' }], mergedInto: null },
+      ],
+    },
+  }),
+  run: async (page) => {
+    await page.click('[data-action="open-add"]');
+    await page.fill('#add-input', 'ｷﾞｭｳﾆｭｳ');
+    await page.waitForSelector('#suggests .cand');
+  },
+};
+const suggestNames = [
+  '牛乳',
+  '牛肉',
+  '牛すじのとても長い名前の国産きめ細かな煮込み用（大容量）',
+  '牛タン',
+  '牛丼',
+  '牛もつ',
+  '牛脂',
+];
+const suggestLines = [];
+suggestNames.forEach((name, index) => {
+  const times = suggestNames.length - index;
+  for (let n = 0; n < times; n += 1) {
+    suggestLines.push({
+      id: `s${index}-${n}`, name, storeId: 'aeon', date: isoOff(-(n + 1)), price: 100 + index,
+      source: 'check', memo: '', itemId: null,
+    });
+  }
+});
+scenarios['27-suggest-max'] = {
+  data: mk([], { history: { version: 2, lines: suggestLines, receipts: [], goods: [] } }),
+  run: async (page) => {
+    await page.click('[data-action="open-add"]');
+    await page.fill('#add-input', '牛');
+    await page.locator('#suggests .cand').nth(SUGGESTION_LIMIT - 1).waitFor();
+    assertSuggestCount(page);
+  },
+};
+
+const boughtNow = (name, storeId) => ({ ...it(name, storeId), boughtAt: new Date().toISOString(), boughtDate: today() });
+scenarios['28-delete-empty'] = { data: mk([]) };
+scenarios['29-delete-many'] = {
+  data: mk(twenty, { bought: [boughtNow('ヨーグルト', 'aeon'), boughtNow('バター', 'aeon'), boughtNow('ジャム', 'aeon')] }),
+};
+scenarios['30-delete-arm'] = {
+  data: mk(twenty),
+  run: (page) => page.locator('.row').first().locator('[data-action="delete-item"]').click(),
+};
+scenarios['31-delete-undo'] = {
+  data: mk(twenty),
+  run: async (page) => {
+    const btn = page.locator('.row').first().locator('[data-action="delete-item"]');
+    await btn.click();
+    await btn.click();
+    await page.waitForSelector('[data-testid="undo-bar"] button');
+  },
+};
+scenarios['32-delete-clear-confirm'] = {
+  data: mk(twenty),
+  run: async (page) => {
+    await page.click('[data-testid="clear-list"]');
+    await page.waitForSelector('[data-testid="confirm-clear-list"]');
+  },
+};
+scenarios['33-delete-checked-confirm'] = {
+  data: mk(
+    [it('柔軟剤', 'matsukiyo', 'つめかえ用'), it('歯ブラシ', 'matsukiyo')],
+    { bought: ['キャベツ', '人参', '玉ねぎ', '牛乳', '卵', '食パン', '豆腐', '納豆'].map((name) => boughtNow(name, 'aeon')) },
+  ),
+  run: async (page) => {
+    await page.click('[data-testid="clear-checked"]');
+    await page.waitForSelector('[data-testid="confirm-clear-checked"]');
+  },
+};
+
+const historyGoods = [
+  { id: 'g1', name: '牛乳', aliases: [{ storeId: 'aeon', notation: 'ぎゅうにゅう1l' }, { storeId: 'matsukiyo', notation: 'ぎゅうにゅう' }], mergedInto: null },
+];
+const historyNames = [
+  ['牛乳', -1, 198], ['卵', -1, 258], ['食パン', -2, 138],
+  ['とても長い名前の国産きめ細かな絹ごし豆腐（大容量パック）', -3, 12800],
+  ['キャベツ', -4, 198], ['柔軟剤', -5, 458], ['歯ブラシ', -6, 330],
+  ['麦茶', -8, 98], ['ツナ缶', -10, 168], ['納豆', -12, 78], ['醤油', -14, 248], ['冷凍うどん', -20, 198],
+];
+const historyLines = historyNames.map(([name, days, price], index) => ({
+  id: `h${index}`, itemId: null, name, storeId: index === 5 || index === 6 ? 'matsukiyo' : 'aeon',
+  date: isoOff(days), boughtAt: `${isoOff(days)}T03:00:00.000Z`, price, memo: '', source: 'check',
+  goodsId: index === 0 ? 'g1' : null,
+}));
+const historyMany = mk([it('牛乳', 'aeon')], {
+  priceBook: { [priceKey('aeon', '牛乳')]: 198 },
+  history: {
+    version: 2,
+    lines: historyLines,
+    receipts: [{ id: 'r1', storeId: 'aeon', date: isoOff(-1), source: 'receipt', text: '牛乳 198', savedAt: new Date().toISOString() }],
+    goods: historyGoods,
+  },
+});
+scenarios['34-history-empty'] = {
+  data: mk([]),
+  run: async (page) => {
+    await page.click('.tab >> text=マイページ');
+    await page.locator('#history-sec').scrollIntoViewIfNeeded();
+  },
+};
+scenarios['35-history-many'] = {
+  data: historyMany,
+  viewport: { width: 390, height: 3000 },
+  scale: 1,
+  run: (page) => page.click('.tab >> text=マイページ'),
+};
+scenarios['36-history-clear-confirm'] = {
+  data: historyMany,
+  run: async (page) => {
+    await page.click('.tab >> text=マイページ');
+    await page.click('[data-testid="clear-history"]');
+    await page.waitForSelector('[data-testid="confirm-history-all"]');
+  },
+};
+scenarios['37-history-one-confirm'] = {
+  data: historyMany,
+  run: async (page) => {
+    await page.click('.tab >> text=マイページ');
+    await page.locator('[data-action="delete-history"]').first().click();
+    await page.waitForSelector('[data-testid="confirm-history-one"]');
+  },
+};
+
+function monthDate(offset, day) {
+  const now = new Date();
+  now.setHours(12, 0, 0, 0);
+  const first = new Date(now.getFullYear(), now.getMonth() + offset, 1);
+  const last = new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate();
+  first.setDate(Math.min(day, last));
+  const p = (n) => String(n).padStart(2, '0');
+  return `${first.getFullYear()}-${p(first.getMonth() + 1)}-${p(first.getDate())}`;
+}
+const d0 = (day) => monthDate(0, day);
+const d1 = (day) => monthDate(-1, day);
+const d2 = (day) => monthDate(-2, day);
+const longName = 'とても長い名前の国産きめ細かな絹ごし豆腐（大容量パック）';
+const purchaseGoods = [
+  { id: 'g1', name: 'ぎゅうにゅう', aliases: [{ storeId: 'aeon', notation: 'ぎゅうにゅう1l' }], mergedInto: 'g2' },
+  { id: 'g2', name: '牛乳', aliases: [{ storeId: 'matsukiyo', notation: 'ぎゅうにゅう' }], mergedInto: null },
+];
+function pLine(id, name, storeId, date, price, extra = {}) {
+  return {
+    id, itemId: null, name, storeId, date, price,
+    boughtAt: extra.boughtAt ?? (date ? `${date}T03:00:00.000Z` : null),
+    memo: '', source: 'check', ...extra,
+  };
+}
+const purchaseLines = [
+  pLine('p1', '牛乳', 'aeon', d0(12), 188, { goodsId: 'g2', boughtAt: `${d0(12)}T02:00:00.000Z` }),
+  pLine('p2', '牛乳', 'matsukiyo', d0(12), 198, { goodsId: 'g2', boughtAt: `${d0(12)}T08:00:00.000Z` }),
+  pLine('p3', '卵', 'aeon', d0(12), 258, { boughtAt: `${d0(12)}T04:00:00.000Z` }),
+  pLine('p4', '卵', 'aeon', d0(12), null, { boughtAt: `${d0(12)}T06:00:00.000Z` }),
+  pLine('p5', longName, 'aeon', d0(11), 12800),
+  pLine('p6', '食パン', 'aeon', d0(10), 138),
+  pLine('p7', '牛肉', 'aeon', d0(8), 580),
+  pLine('p8', 'キャベツ', 'aeon', d0(6), 198),
+  pLine('p9', 'ツナ缶', 'aeon', d0(7), 168),
+  pLine('p10', '柔軟剤', 'matsukiyo', d0(4), 458),
+  pLine('p11', '牛乳', 'aeon', d0(4), null, { goodsId: 'g2' }),
+  pLine('p12', '歯ブラシ', 'amazon', d0(3), 330),
+  pLine('p13', '麦茶', 'aeon', d0(2), null),
+  pLine('p14', '人参', 'aeon', d0(2), null),
+  pLine('p15', '納豆', 'aeon', d0(1), 78),
+  pLine('p16', '牛乳', 'aeon', d1(20), 158, { goodsId: 'g2' }),
+  pLine('p17', '卵', 'aeon', d1(20), 248),
+  pLine('p18', '豚肉', 'aeon', d1(18), 398),
+  pLine('p19', '鮭', 'aeon', d1(15), 498),
+  pLine('p20', '豆腐', 'aeon', d1(12), 88),
+  pLine('p21', 'ヨーグルト', 'matsukiyo', d1(10), 128),
+  pLine('p22', '牛乳', 'amazon', d1(8), 210, { goodsId: 'g2' }),
+  pLine('p23', 'バター', 'amazon', d1(6), 298),
+  pLine('p24', 'ジャム', 'aeon', d1(4), 280),
+  pLine('p25', '醤油', 'aeon', d1(2), 248),
+  pLine('p26', 'ティッシュ', 'matsukiyo', d1(22), 398),
+  pLine('p27', '牛乳', 'aeon', d2(15), 176, { goodsId: 'g2' }),
+  pLine('p28', '冷凍うどん', 'aeon', d2(12), 198),
+  pLine('p29', 'りんご', 'amazon', d2(8), 198),
+  pLine('p30', 'バナナ', 'aeon', d2(5), 128),
+  pLine('p31', 'お茶', 'matsukiyo', d2(3), 98),
+  pLine('p32', '乾電池', 'amazon', d2(1), 330),
+  pLine('p33', '玉ねぎ', 'aeon', null, 100),
+  pLine('p34', '洗剤', 'oldshop', d1(9), 420),
+  pLine('p35', 'ぎゅうにゅう', 'aeon', d0(9), 220, { goodsId: 'g1', notation: 'ぎゅうにゅう1l' }),
+];
+const purchaseMany = mk([], { history: { version: 2, lines: purchaseLines, receipts: [], goods: purchaseGoods } });
+async function openHistory(page) {
+  await page.click('.tab >> text=マイページ');
+  await page.locator('[data-testid="open-history"]').scrollIntoViewIfNeeded();
+  await page.click('[data-testid="open-history"]');
+  await page.waitForSelector('[data-testid="history-summary"]');
+}
+scenarios['38-history-view-empty'] = {
+  data: mk([], { history: { version: 2, lines: [], receipts: [], goods: [] } }),
+  run: openHistory,
+};
+scenarios['39-history-view-one'] = {
+  data: mk([], { history: { version: 2, lines: [pLine('one', '牛乳', 'aeon', d0(3), 198, { goodsId: 'g2' })], receipts: [], goods: purchaseGoods } }),
+  run: openHistory,
+};
+scenarios['40-history-view-many'] = {
+  data: purchaseMany,
+  viewport: { width: 390, height: 5600 },
+  scale: 1,
+  run: openHistory,
+};
+scenarios['41-history-view-filter'] = {
+  data: purchaseMany,
+  run: async (page) => {
+    await openHistory(page);
+    await page.locator('[data-testid="history-period"]').getByRole('button', { name: '先月', exact: true }).click();
+    await page.locator('[data-testid="history-stores"]').getByRole('button', { name: 'イオン', exact: true }).click();
+    await page.waitForFunction(() => document.querySelector('[data-testid="history-condition"]')?.textContent?.includes('先月・イオン'));
+  },
+};
+scenarios['42-history-view-item'] = {
+  data: purchaseMany,
+  run: async (page) => {
+    await openHistory(page);
+    await page.locator('[data-testid="purchase-row"]', { hasText: '牛乳' }).first().click();
+    await page.waitForSelector('[data-testid="purchase-stats"]');
+  },
+};
+scenarios['43-history-view-search'] = {
+  data: purchaseMany,
+  run: async (page) => {
+    await openHistory(page);
+    await page.fill('#history-query', '牛');
+    await page.waitForFunction(() => document.querySelector('[data-testid="history-condition"]')?.textContent?.includes('「牛」'));
+    await page.evaluate(() => { const m = document.querySelector('[data-scroll]'); if (m) m.scrollTop = 0; });
+  },
+};
+scenarios['44-history-view-none'] = {
+  data: purchaseMany,
+  run: async (page) => {
+    await openHistory(page);
+    await page.fill('#history-query', 'ない品');
+    await page.waitForSelector('[data-testid="history-reset"]');
+  },
+};
+
+function assertSuggestCount(page) {
+  return page.locator('#suggests .cand').count().then((count) => {
+    if (count !== SUGGESTION_LIMIT) throw new Error(`候補は${SUGGESTION_LIMIT}件のはずが ${count}件`);
+  });
+}
 
 for (const [name, sc] of Object.entries(scenarios)) {
   const ctx = await browser.newContext({ viewport: sc.viewport || { width: 390, height: 844 }, deviceScaleFactor: sc.scale || 3, locale: 'ja-JP' });

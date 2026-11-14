@@ -1,6 +1,7 @@
 import { UNSET_ID } from '../state/store.js';
 import { esc } from './util.js';
 import { icon } from '../lib/icons.js';
+import { historySection } from './history.js';
 
 function historyPreviewHtml(preview) {
   if (!preview) return '';
@@ -46,6 +47,7 @@ ${historyPreviewHtml(ui.historyPreview)}</section>
 <section class="sec"><h2>品物のまとめ</h2>
 <p class="note">レシートで直した品名を、あとからひとつにまとめたり、分けたりできます。明細に残した元の表記は消えません。</p>
 <div class="btnrow"><button type="button" class="btn" data-action="open-goods">まとめる・分ける</button></div></section>
+${historySection(state)}
 <p class="ver">買い物リスト v${esc(version)} ・ データはこの端末の中だけに保存されます</p>
 </main>`;
 }

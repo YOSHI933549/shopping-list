@@ -4,7 +4,8 @@ import * as S from './state/store.js';
 import { renderList } from './ui/list.js';
 import { renderRegular } from './ui/regular.js';
 import { renderMypage } from './ui/mypage.js';
-import { addSheetHtml, boughtSheetHtml, editSheetHtml, storePills, recentCards } from './ui/sheets.js';
+import { renderPurchases } from './ui/purchase.js';
+import { addSheetHtml, boughtSheetHtml, editSheetHtml, storePills, recentCards, confirmHtml } from './ui/sheets.js';
 import { goodsSheetHtml } from './ui/goods.js';
 import { confirmSheetHtml, pasteSheetHtml, totalsHtml } from './ui/receipt.js';
 import { scanStatusHtml } from './ui/receiptScan.js';
@@ -18,6 +19,8 @@ import {
   historyImportSummary, parseHistoryBackup, stateWithHistory,
 } from './lib/historyBackup.js';
 import { parseSpoken, speechSupported, listen } from './lib/speech.js';
+import { itemSuggestions } from './lib/suggest.js';
+import { esc } from './ui/util.js';
 
 const opened = S.load();
 let state = opened.problem?.scope === 'list' ? opened.state : S.pruneBought(opened.state);
@@ -27,6 +30,7 @@ const ui = {
   tab: 'list', filter: 'all', sheet: null, sheetStore: null, sheetAdded: [], memoOpen: false, exportText: '',
   receipt: null, nudge: openingNudge?.message || '', nudgeAction: openingNudge ? 'open-history-export' : 'open-export',
   goodsPick: null, historyPreview: null,
+  armDelete: null, undo: null, purchaseOpen: false, purchaseItem: null, purchasePeriod: 'all', purchaseStore: 'all', purchaseQuery: '',
 };
 const pending = new Set();
 const speech = speechSupported();
@@ -40,6 +44,18 @@ const tabs = app.querySelector('.tabs');
 const overlay = document.createElement('div');
 overlay.id = 'overlay';
 document.body.appendChild(overlay);
+const confirmHost = document.createElement('div');
+confirmHost.id = 'confirm';
+document.body.appendChild(confirmHost);
+const undoHost = document.createElement('div');
+undoHost.id = 'undo-bar';
+undoHost.className = 'undo-bar';
+undoHost.setAttribute('data-testid', 'undo-bar');
+undoHost.hidden = true;
+document.body.appendChild(undoHost);
+const UNDO_MS = 5000;
+let confirmAction = null;
+let undoTimer = null;
 
 const TABS = [['regular', 'repeat', '定期購入品'], ['list', 'list', '買い物リスト'], ['mypage', 'person', 'マイページ']];
 
@@ -68,20 +84,61 @@ function loadNoticeHtml(problem) {
   return `<div class="load-note" role="alert" data-testid="load-note"><p>${text}</p><div class="btnrow">${buttons}</div></div>`;
 }
 
+let purchaseComposing = false;
+
 function render() {
   const sc = view.querySelector('[data-scroll]')?.scrollTop ?? 0;
+  const queryFocused = document.activeElement?.id === 'history-query';
+  const sel = queryFocused ? [document.activeElement.selectionStart, document.activeElement.selectionEnd] : null;
   const boughtCount = S.boughtToday(state).length;
   if (ui.tab === 'list') view.innerHTML = renderList(state, ui, { speech, boughtCount, nudge: ui.nudge, nudgeAction: ui.nudgeAction }).html;
   else if (ui.tab === 'regular') view.innerHTML = renderRegular(state, ui);
+  else if (ui.purchaseOpen) view.innerHTML = renderPurchases(state, ui);
   else view.innerHTML = renderMypage(state, ui, version);
   const mainEl = view.querySelector('main');
   if (loadProblem && mainEl) mainEl.insertAdjacentHTML('afterbegin', loadNoticeHtml(loadProblem));
   const m = view.querySelector('[data-scroll]');
   if (m) m.scrollTop = sc;
   tabs.innerHTML = TABS.map(([k, ic, label]) => `<button class="tab${ui.tab === k ? ' on' : ''}" data-action="tab" data-id="${k}">${icon(ic, 26)}${label}</button>`).join('');
+  if (queryFocused) {
+    const next = view.querySelector('#history-query');
+    if (next) {
+      next.focus();
+      try { next.setSelectionRange(sel[0], sel[1]); } catch { /* 入力の途中で選択が取れないことがある */ }
+    }
+  }
 }
 
 let toastTimer;
+function paintUndo() {
+  if (!ui.undo) {
+    undoHost.hidden = true;
+    undoHost.innerHTML = '';
+    return;
+  }
+  undoHost.hidden = false;
+  undoHost.innerHTML = `<span>「${esc(ui.undo.item.name)}」を消しました</span><button type="button" data-action="undo-delete">元に戻す</button>`;
+}
+function dismissUndo() {
+  ui.undo = null;
+  clearTimeout(undoTimer);
+  paintUndo();
+}
+function showUndo(item, index) {
+  ui.undo = { item, index };
+  paintUndo();
+  clearTimeout(undoTimer);
+  undoTimer = setTimeout(dismissUndo, UNDO_MS);
+}
+function closeConfirm() {
+  confirmAction = null;
+  confirmHost.innerHTML = '';
+}
+function openConfirm({ title, body, okLabel, danger = false, testid, run }) {
+  confirmAction = run;
+  confirmHost.innerHTML = confirmHtml({ title, body, okLabel, danger, testid });
+  confirmHost.querySelector('button[data-action="confirm-cancel"]')?.focus();
+}
 function toast(msg) {
   document.querySelector('.toast')?.remove();
   const el = document.createElement('div');
@@ -278,7 +335,17 @@ function addFromSheet() {
   ui.memoOpen = false;
   render();
   refreshAddSheet();
+  refreshSuggestions();
   input.focus();
+}
+
+function refreshSuggestions() {
+  const input = overlay.querySelector('#add-input');
+  const box = overlay.querySelector('#suggests');
+  if (!input || !box) return;
+  const items = itemSuggestions(state.history, input.value);
+  box.innerHTML = items.map((item) => `<button type="button" class="cand" data-action="pick-suggest" data-name="${esc(item.name)}">${esc(item.name)}</button>`).join('');
+  box.classList.toggle('hidden', items.length === 0);
 }
 
 // ---- 音声 ----
@@ -436,6 +503,85 @@ const actions = {
   filter: (id) => { ui.filter = id; render(); },
   aisle: () => commit(S.setSetting(state, 'aisleOrder', !state.settings.aisleOrder)),
   check: checkRow,
+  'delete-item': (id) => {
+    if (listBlocked()) return;
+    if (ui.armDelete !== id) {
+      ui.armDelete = id;
+      render();
+      return;
+    }
+    const index = state.items.findIndex((i) => i.id === id);
+    ui.armDelete = null;
+    if (index < 0) { render(); return; }
+    const item = state.items[index];
+    commit(S.removeItem(state, id));
+    showUndo(item, index);
+  },
+  'undo-delete': () => {
+    if (!ui.undo) return;
+    const { item, index } = ui.undo;
+    dismissUndo();
+    commit(S.insertItem(state, item, index));
+  },
+  'ask-clear-checked': () => {
+    const items = S.boughtToday(state);
+    if (!items.length) return;
+    openConfirm({
+      title: 'チェック済みを削除',
+      body: `今日チェックした ${items.length}件を消します。リストには戻りません。購入履歴は残ります。`,
+      okLabel: `${items.length}件を削除`,
+      testid: 'confirm-clear-checked',
+      run: () => {
+        commit(S.clearBoughtToday(state));
+        if (ui.sheet === 'bought') closeSheet();
+      },
+    });
+  },
+  'ask-clear-list': () => {
+    const n = state.items.length;
+    if (!n) return;
+    openConfirm({
+      title: 'リストを空にしますか',
+      body: `リストの ${n}件をすべて消します。チェック済み・購入履歴・品名のまとめは残ります。`,
+      okLabel: `${n}件を消す`,
+      testid: 'confirm-clear-list',
+      run: () => {
+        dismissUndo();
+        ui.armDelete = null;
+        commit(S.clearItems(state));
+      },
+    });
+  },
+  'delete-history': (id) => {
+    const line = (state.history?.lines || []).find((l) => l.id === id);
+    if (!line) return;
+    const name = line.name || '（名前なし）';
+    openConfirm({
+      title: 'この購入履歴を消しますか',
+      body: `「${name}」の1件を消します。品名のまとめは残ります。`,
+      okLabel: 'この1件を削除',
+      testid: 'confirm-history-one',
+      run: () => commit(S.removePurchase(state, id)),
+    });
+  },
+  'ask-clear-history': () => {
+    const n = state.history?.lines?.length || 0;
+    if (!n) return;
+    openConfirm({
+      title: '購入履歴をすべて消しますか',
+      body: `購入履歴 ${n}件を消します。元に戻せません。品名のまとめ（別名・名前の学習）は残ります。`,
+      okLabel: `${n}件を削除`,
+      danger: true,
+      testid: 'confirm-history-all',
+      run: () => commit(S.clearPurchases(state)),
+    });
+  },
+  'confirm-cancel': () => closeConfirm(),
+  'confirm-ok': () => {
+    const run = confirmAction;
+    closeConfirm();
+    run?.();
+  },
   'open-add': openAddSheet,
   'open-receipt': openReceiptPaste,
   'receipt-read': readReceiptText,
@@ -499,8 +645,48 @@ const actions = {
     showGoods();
     toast('分けました');
   },
+  'open-history': () => {
+    ui.tab = 'mypage';
+    ui.purchaseOpen = true;
+    ui.purchaseItem = null;
+    render();
+  },
+  'close-history': () => {
+    if (ui.purchaseItem) {
+      ui.purchaseItem = null;
+      render();
+      return;
+    }
+    ui.purchaseOpen = false;
+    render();
+  },
+  'hist-period': (id) => {
+    ui.purchasePeriod = id === 'month' || id === 'last' ? id : 'all';
+    render();
+    const main = view.querySelector('[data-scroll]');
+    if (main) main.scrollTop = 0;
+  },
+  'hist-store': (id) => {
+    ui.purchaseStore = id || 'all';
+    render();
+    const main = view.querySelector('[data-scroll]');
+    if (main) main.scrollTop = 0;
+  },
+  'hist-reset': () => {
+    ui.purchasePeriod = 'all';
+    ui.purchaseStore = 'all';
+    ui.purchaseQuery = '';
+    render();
+  },
+  'open-purchase': (id) => {
+    if (!id) return;
+    ui.purchaseItem = id;
+    render();
+  },
   'open-export': () => {
     ui.tab = 'mypage';
+    ui.purchaseOpen = false;
+    ui.purchaseItem = null;
     ui.nudge = '';
     render();
     view.querySelector('#export-sec')?.scrollIntoView({ block: 'start' });
@@ -517,6 +703,17 @@ const actions = {
   'save-edit': saveEdit,
   'pick-store': (id) => { ui.sheetStore = id; refreshAddSheet(); overlay.querySelector('#add-input').focus(); },
   add: addFromSheet,
+  'pick-suggest': (_, btn) => {
+    const input = overlay.querySelector('#add-input');
+    if (!input) return;
+    input.value = btn.dataset.name || '';
+    input.focus();
+    const box = overlay.querySelector('#suggests');
+    if (box) {
+      box.innerHTML = '';
+      box.classList.add('hidden');
+    }
+  },
   'toggle-memo': () => { ui.memoOpen = !ui.memoOpen; refreshAddSheet(); overlay.querySelector(ui.memoOpen ? '#memo-input' : '#add-input').focus(); },
   'undo-add': (id) => { ui.sheetAdded = ui.sheetAdded.filter((x) => x !== id); commit(S.removeItem(state, id)); refreshAddSheet(); overlay.querySelector('#add-input').focus(); },
   'undo-bought': (id) => { commit(S.undoBought(state, id)); const left = S.boughtToday(state); if (left.length) openBoughtSheet(); else closeSheet(); },
@@ -577,12 +774,29 @@ const actions = {
 
 document.addEventListener('click', (e) => {
   const el = e.target.closest('[data-action]');
+  if (ui.armDelete && el?.dataset.action !== 'delete-item') {
+    ui.armDelete = null;
+    render();
+  }
   if (!el) return;
   const fn = actions[el.dataset.action];
   if (fn) fn(el.dataset.id, el);
 });
 
 document.addEventListener('input', (e) => {
+  if (e.target?.id === 'add-input') {
+    refreshSuggestions();
+    return;
+  }
+  if (e.target?.id === 'history-query') {
+    ui.purchaseQuery = e.target.value;
+    if (!purchaseComposing) {
+      render();
+      const main = view.querySelector('[data-scroll]');
+      if (main) main.scrollTop = 0;
+    }
+    return;
+  }
   if (ui.sheet !== 'receipt-confirm' || !ui.receipt) return;
   const row = e.target.closest?.('[data-line]');
   if (!row) return;
@@ -602,6 +816,18 @@ document.addEventListener('input', (e) => {
     if (amount && String(amount.value) !== String(line.amount ?? '')) amount.value = line.amount ?? '';
   }
   refreshReceiptTotals();
+});
+
+document.addEventListener('compositionstart', (e) => {
+  if (e.target?.id === 'history-query') purchaseComposing = true;
+});
+document.addEventListener('compositionend', (e) => {
+  if (e.target?.id !== 'history-query') return;
+  purchaseComposing = false;
+  ui.purchaseQuery = e.target.value;
+  render();
+  const main = view.querySelector('[data-scroll]');
+  if (main) main.scrollTop = 0;
 });
 
 document.addEventListener('focusin', (e) => {
@@ -626,6 +852,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.isComposing && e.target.matches('#add-input, #memo-input, #price-input')) { e.preventDefault(); addFromSheet(); }
   if (e.key === 'Enter' && !e.isComposing && e.target.classList?.contains('rname')) e.preventDefault();
   if (e.key === 'Enter' && !e.isComposing && e.target.id === 'edit-price') { e.preventDefault(); saveEdit(overlay.querySelector('[data-action="save-edit"]').dataset.id); }
+  if (e.key === 'Escape' && confirmAction) { closeConfirm(); return; }
   if (e.key === 'Escape' && ui.sheet) closeSheet();
 });
 
