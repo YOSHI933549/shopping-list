@@ -1,45 +1,6 @@
 // 撮って読む、の端末内処理。画面も通信も持たない。
 // このファイルと src/ocr、src/ui/receiptScan.js、public/ocr を外せば試作を外せる。
 
-export const SCAN_MAX_EDGE = 1600;
-
-function positiveInt(n) {
-  const x = Math.round(Number(n));
-  return Number.isFinite(x) && x > 0 ? x : 0;
-}
-
-/** 長辺が maxEdge を超えるときだけ縮小する。拡大はしない。 */
-export function scaledSize(width, height, maxEdge = SCAN_MAX_EDGE) {
-  const w = positiveInt(width);
-  const h = positiveInt(height);
-  const edge = positiveInt(maxEdge);
-  if (!w || !h || !edge) return { width: 0, height: 0 };
-  if (Math.max(w, h) <= edge) return { width: w, height: h };
-  const scale = edge / Math.max(w, h);
-  return {
-    width: Math.max(1, Math.round(w * scale)),
-    height: Math.max(1, Math.round(h * scale)),
-  };
-}
-
-/**
- * RGBA を白黒にする。明るさは整数の近似（77, 150, 29）。アルファは不透明にする。
- * 返す配列は引数とは別。
- */
-export function grayPixels(rgba) {
-  const src = rgba instanceof Uint8ClampedArray ? rgba : Uint8ClampedArray.from(rgba || []);
-  const out = new Uint8ClampedArray(src.length);
-  const n = src.length - (src.length % 4);
-  for (let i = 0; i < n; i += 4) {
-    const y = (src[i] * 77 + src[i + 1] * 150 + src[i + 2] * 29) >> 8;
-    out[i] = y;
-    out[i + 1] = y;
-    out[i + 2] = y;
-    out[i + 3] = 255;
-  }
-  return out;
-}
-
 const IMAGE_EXT = /\.(jpe?g|png|gif|webp|heic|heif|bmp|tif|tiff)$/i;
 
 /** ファイル選択が画像らしいときだけ true。中身は見ない。 */

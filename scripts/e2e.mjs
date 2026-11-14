@@ -390,6 +390,21 @@ try {
   assert.equal(hist4.receipts.length, 3);
   assert.equal(await page.locator('.row', { hasText: '食パン' }).count(), 1); ok('読み取りだけでは履歴を増やさず、リストも上書きしない');
 
+  // 傾き・影・ざらつきのある読みにくい画像でも、値段が品名と同じ行に付き、合計・お釣りが品に混ざらない
+  await page.click('[data-action="open-receipt"]');
+  await page.locator('#receipt-camera').setInputFiles(path.join(root, 'tests/fixtures/hard-receipt.png'));
+  await page.waitForSelector('[data-testid="receipt-rows"]', { timeout: 180000 });
+  const hardAmounts = await page.locator('.rrow:not(.runknown) .ramount').evaluateAll((els) => els.map((el) => Number(el.value)));
+  const hardRaws = await page.locator('.rrow .rraw').allInnerTexts();
+  console.log(`  OCR(読みにくい画像) 金額 ${hardAmounts.join(',')}`);
+  console.log(hardRaws.join(' / '));
+  for (const yen of [198, 258, 148, 196]) assert.ok(hardAmounts.includes(yen), `値段 ${yen} が品に付いていない: ${hardAmounts}`);
+  assert.ok(hardAmounts.length >= 5 && hardAmounts.length <= 6, `品の数が合わない: ${hardAmounts}`);
+  for (const bad of [1078, 80, 2000, 922]) assert.ok(!hardAmounts.includes(bad), `合計・税・お預り・お釣りが品に入っている: ${bad}`);
+  assert.match(await page.locator('[data-testid="receipt-sum"]').innerText(), /1,?078/);
+  ok('読みにくい画像でも値段が品名の行に付き、合計・お釣りは品に入らない');
+  await page.click('.sh-head >> text=閉じる');
+
   await page.click('[data-action="open-add"]');
   await page.fill('#add-input', 'ぎゅう');
   const suggest = page.locator('#suggests .cand');
