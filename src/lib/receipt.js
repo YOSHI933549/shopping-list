@@ -1,5 +1,6 @@
 import { normalize } from './categorize.js';
 import { MAX_PRICE } from './price.js';
+import { repairOcrLine } from './receiptLines.js';
 
 // レシートの貼り付け文字を、明細と合計の照合に分ける。
 // 画面にも保存にも書かない。渡された文字列だけを見る（外には送らない）。
@@ -179,9 +180,14 @@ export function stripSensitiveLines(input) {
 }
 
 function isDiscountLabel(namePart) {
-  const n = normalize(namePart).replace(/[()]/g, '');
+  const n = normalize(namePart).replace(/[()（）\s]/g, '');
   if (!n) return false;
-  return /^(?:まとめ)?(?:値引|値引き|割引|割引き|値下|値下げ|ねびき|わりびき|ねさげ|くーぽん)(?:対象|額|分|等)?$/.test(n);
+  return /^(?:\d+%)?(?:まとめ|会員|ぽいんと|くーぽん|せーる|ちらし|特売|店内)?(?:値引き?|割引き?|値下げ?|ねびき|わりびき|ねさげ|くーぽん|でぃすかうんと)(?:券|対象|額|分|等|率|シール|\d+%)?$/.test(n);
+}
+
+function isPointLine(bare) {
+  const n = normalize(bare);
+  return /ぽいんと|ぽいんとかーど|点数|^p(?:数|付与)/.test(n) || /ポイント|ﾎﾟｲﾝﾄ/.test(bare);
 }
 
 function extractVolume(s) {
@@ -376,9 +382,9 @@ function finishItem({ raw, namePart, quantity, unitPrice, amount }) {
   };
 }
 
-function classify(rawLine) {
+function classify(rawLine, workLine = rawLine) {
   const raw = String(rawLine);
-  const s = prep(raw).trim();
+  const s = prep(workLine).trim();
   if (!s) return { kind: 'empty' };
   if (isSeparator(s) || isGreeting(s)) return { kind: 'skip' };
   if (isDateOrTimeLine(s)) return { kind: 'meta' };
@@ -394,6 +400,7 @@ function classify(rawLine) {
   }
   if (matchesLabel(compact, PAYMENT_LABELS)) return { kind: 'skip' };
   if (/^レジ\d+$/.test(bare)) return { kind: 'skip' };
+  if (isPointLine(bare) && !/(?:値引|割引)/.test(bare)) return { kind: 'skip' };
   if (/^担当/.test(bare) && !/\d{2,}円?$/.test(bare)) return { kind: 'skip' };
 
   const qty = splitQtyPrice(s);
@@ -518,7 +525,7 @@ export function parseReceipt(input) {
   const date = findDate(scanned);
   const time = findTime(scanned);
   const tax = detectTax(scanned);
-  const list = text.split('\n').map(classify);
+  const list = text.split('\n').map((line) => classify(line, repairOcrLine(line)));
   const items = [];
   const unknown = [];
   const consumed = new Set();

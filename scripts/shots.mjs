@@ -191,6 +191,15 @@ scenarios['23-receipt-scan-failed'] = {
   },
 };
 
+scenarios['45-receipt-scan-hard'] = {
+  data: mk([]),
+  run: async (page) => {
+    await page.click('[data-action="open-receipt"]');
+    await page.locator('#receipt-camera').setInputFiles(path.join(root, 'tests/fixtures/hard-receipt.png'));
+    await page.waitForSelector('[data-testid="receipt-rows"]', { timeout: 180000 });
+  },
+};
+
 const confirmLines = [
   'ｷﾞｭｳﾆｭｳ1L 198',
   'ﾀﾏｺﾞ10ｺ 258',

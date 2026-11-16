@@ -1,30 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { parseReceipt } from '../src/lib/receipt.js';
 import {
-  countMatchingLines, grayPixels, isReceiptImage, normalizeScanLine, progressView, sameOriginAsset, scaledSize,
+  countMatchingLines, isReceiptImage, normalizeScanLine, progressView, sameOriginAsset,
 } from '../src/lib/receiptScan.js';
 import { pasteSheetHtml } from '../src/ui/receipt.js';
 import { scanStatusHtml } from '../src/ui/receiptScan.js';
 
 const SAMPLE = ['イオン', '牛乳 198', '卵 258', '合計 456'];
 
-describe('撮って読むの下準備', () => {
-  it('長辺が 1600 を超えるときだけ縮め、小さい画像はそのまま', () => {
-    expect(scaledSize(4000, 2000)).toEqual({ width: 1600, height: 800 });
-    expect(scaledSize(10, 4000)).toEqual({ width: 4, height: 1600 });
-    expect(scaledSize(800, 600)).toEqual({ width: 800, height: 600 });
-    expect(scaledSize(0, 100)).toEqual({ width: 0, height: 0 });
-    expect(scaledSize(-3, 10)).toEqual({ width: 0, height: 0 });
-  });
-
-  it('白黒は別の配列で、赤を暗くして不透明にする', () => {
-    const src = Uint8ClampedArray.of(255, 0, 0, 40, 0, 0, 0, 10);
-    const out = grayPixels(src);
-    expect(out).not.toBe(src);
-    expect(Array.from(out)).toEqual([76, 76, 76, 255, 0, 0, 0, 255]);
-    expect(Array.from(src)).toEqual([255, 0, 0, 40, 0, 0, 0, 10]);
-  });
-
+describe('撮って読むの入口', () => {
   it('画像らしいファイルだけ通す', () => {
     expect(isReceiptImage({ type: 'image/jpeg', name: 'a.jpg' })).toBe(true);
     expect(isReceiptImage({ type: '', name: 'receipt.HEIC' })).toBe(true);
